@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Suvida — Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+Thai:wght@400;500;600&family=Noto+Sans+Thai:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/shared/theme.css">
+</head>
+<body>
+
+<header class="app-header">
+  <div class="app-header__brand" id="brand-name">Suvida</div>
+  <div class="row">
+    <div id="lang-toggle"></div>
+    <button class="btn btn-ghost btn-sm hidden" id="logout-btn" data-i18n="nav_logout"></button>
+  </div>
+</header>
+
+<main class="app-shell" style="padding-top: var(--space-3);">
+
+  <section id="login-section" class="hidden" style="max-width: 360px; margin: var(--space-8) auto;">
+    <div class="card stack">
+      <h2 class="text-h3" data-i18n="login_title"></h2>
+      <form id="login-form" class="stack">
+        <div class="field">
+          <label for="login-username" data-i18n="login_username"></label>
+          <input class="input" id="login-username" type="text" autocomplete="username" required>
+        </div>
+        <div class="field">
+          <label for="login-password" data-i18n="login_password"></label>
+          <input class="input" id="login-password" type="password" autocomplete="current-password" required>
+        </div>
+        <div class="checkbox-row">
+          <input type="checkbox" id="login-remember" checked>
+          <label for="login-remember" data-i18n="login_remember"></label>
+        </div>
+        <div id="login-error" class="field-error hidden"></div>
+        <button type="submit" class="btn btn-primary" data-i18n="login_submit"></button>
+      </form>
+    </div>
+  </section>
+
+  <section id="app-section" class="hidden">
+    <div class="tabs" role="tablist">
+      <button class="tab" role="tab" id="tab-btn-calendar" data-i18n="nav_calendar" aria-selected="false"></button>
+      <button class="tab" role="tab" id="tab-btn-schedule" data-i18n="nav_schedule" aria-selected="true"></button>
+      <button class="tab" role="tab" id="tab-btn-notifications" aria-selected="false"><span data-i18n="nav_notifications"></span><span id="notif-badge"></span></button>
+      <button class="tab" role="tab" id="tab-btn-log" data-i18n="nav_log" aria-selected="false"></button>
+      <button class="tab" role="tab" id="tab-btn-settings" data-i18n="nav_settings" aria-selected="false"></button>
+    </div>
+
+    <section id="tab-schedule" class="stack">
+      <div id="no-activation-banner" class="banner hidden" data-i18n="schedule_no_activation_banner"></div>
+
+      <div class="card">
+        <h3 class="card-title" data-i18n="schedule_template_title"></h3>
+        <p class="text-caption" data-i18n="schedule_template_hint"></p>
+        <div id="template-list" class="list"></div>
+        <form id="template-form" class="row" style="margin-top: var(--space-2); flex-wrap: wrap;">
+          <div class="field">
+            <label data-i18n="schedule_template_add_weekday"></label>
+            <select class="input" id="tf-weekday"></select>
+          </div>
+          <div class="field">
+            <label data-i18n="schedule_template_add_time"></label>
+            <input class="input" id="tf-time" type="time" step="1800" value="09:00" required>
+          </div>
+          <button type="submit" class="btn btn-primary" style="align-self: flex-end;" data-i18n="schedule_template_add_btn"></button>
+        </form>
+        <div id="template-error" class="field-error hidden"></div>
+      </div>
+
+      <div class="card">
+        <h3 class="card-title" data-i18n="schedule_bulk_title"></h3>
+        <form id="bulk-form" class="row">
+          <div class="field">
+            <label data-i18n="schedule_bulk_weeks_label"></label>
+            <input class="input" id="bulk-weeks" type="number" min="1" max="26" value="4" style="width: 90px;">
+          </div>
+          <button type="submit" class="btn btn-secondary" style="align-self: flex-end;" data-i18n="schedule_bulk_btn"></button>
+        </form>
+      </div>
+
+      <div class="card">
+        <h3 class="card-title" data-i18n="schedule_weeks_title"></h3>
+        <div id="weeks-list" class="list"></div>
+      </div>
+    </section>
+
+    <section id="tab-calendar" class="hidden stack">
+      <div class="row-wrap text-caption">
+        <span class="row"><span class="dot" style="background: var(--color-success);"></span> <span data-i18n="calendar_legend_free"></span></span>
+        <span class="row"><span class="dot" style="background: var(--primary);"></span> <span data-i18n="calendar_legend_booked"></span></span>
+        <span class="row"><span class="dot" style="background: var(--text-quiet);"></span> <span data-i18n="calendar_legend_blocked"></span></span>
+      </div>
+      <div id="admin-calendar"></div>
+    </section>
+
+    <section id="tab-notifications" class="hidden">
+      <div id="notifications-list" class="list"></div>
+    </section>
+
+    <section id="tab-log" class="hidden stack">
+      <form id="log-filters" class="row-wrap">
+        <div class="field">
+          <label data-i18n="log_filter_type"></label>
+          <select class="input" id="log-type"></select>
+        </div>
+        <div class="field">
+          <label data-i18n="log_filter_actor"></label>
+          <select class="input" id="log-actor"></select>
+        </div>
+        <div class="field">
+          <label data-i18n="log_filter_month"></label>
+          <input class="input" id="log-month" type="month">
+        </div>
+        <button type="button" class="btn btn-ghost" id="log-order-toggle" style="align-self: flex-end;"></button>
+      </form>
+      <p class="text-caption" data-i18n="log_month_note"></p>
+      <div id="log-list" class="list"></div>
+      <button type="button" class="btn btn-secondary hidden" id="log-load-more" data-i18n="common_load_more"></button>
+    </section>
+
+    <section id="tab-settings" class="hidden stack">
+      <div class="card">
+        <h3 class="card-title" data-i18n="settings_display_name"></h3>
+        <p id="settings-display-name" class="text-body"></p>
+      </div>
+      <div class="card stack">
+        <h3 class="card-title" data-i18n="settings_slug_title"></h3>
+        <div class="field">
+          <label data-i18n="settings_slug_current"></label>
+          <div class="row">
+            <input class="input" id="share-link" type="text" readonly style="flex: 1; min-width: 0;">
+            <button type="button" class="btn btn-secondary" id="share-copy-btn" data-i18n="settings_share_copy"></button>
+          </div>
+        </div>
+        <form id="slug-form" class="field">
+          <label for="slug-input" data-i18n="settings_slug_custom"></label>
+          <div class="row">
+            <input class="input" id="slug-input" type="text" pattern="[a-z0-9-]{3,32}" style="flex: 1; min-width: 0;">
+            <button type="submit" class="btn btn-secondary" data-i18n="settings_slug_save"></button>
+          </div>
+          <div class="field-hint" data-i18n="settings_slug_custom_hint"></div>
+          <div id="slug-error" class="field-error hidden"></div>
+        </form>
+        <button type="button" class="btn btn-ghost" id="slug-regenerate-btn" data-i18n="settings_slug_regenerate" style="align-self: flex-start;"></button>
+      </div>
+    </section>
+  </section>
+
+</main>
+
+<div id="modal-root"></div>
+
+<script src="/shared/i18n.js"></script>
+<script src="/shared/format.js"></script>
+<script src="/shared/api.js"></script>
+<script src="/shared/calendar.js"></script>
+<script src="/admin/app.js"></script>
+</body>
+</html>

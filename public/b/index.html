@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Suvida Piano Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+Thai:wght@400;500;600&family=Noto+Sans+Thai:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/shared/theme.css">
+</head>
+<body>
+
+<header class="app-header">
+  <div class="app-header__brand" id="brand-name">Suvida Piano Studio</div>
+  <div id="lang-toggle"></div>
+</header>
+
+<main class="page">
+  <div id="not-found" class="hidden">
+    <p class="banner banner--error" data-i18n="booker_teacher_not_found"></p>
+  </div>
+
+  <div id="app-body" class="hidden">
+    <div class="tabs" role="tablist">
+      <button class="tab" role="tab" id="tab-btn-book" data-i18n="booker_tab_book" aria-selected="true"></button>
+      <button class="tab" role="tab" id="tab-btn-history" data-i18n="booker_tab_history" aria-selected="false"></button>
+    </div>
+
+    <section id="tab-book">
+      <h2 class="text-h3" data-i18n="booker_pick_day" style="margin-bottom: var(--space-2);"></h2>
+      <div id="calendar"></div>
+    </section>
+
+    <section id="tab-history" class="hidden stack">
+      <div class="card">
+        <h3 class="card-title" data-i18n="booker_history_local_title"></h3>
+        <div id="local-bookings" class="list"></div>
+      </div>
+
+      <div class="card">
+        <h3 class="card-title" data-i18n="booker_history_lookup_title"></h3>
+        <form id="lookup-form" class="row">
+          <div class="field" style="flex: 1;">
+            <input class="input" type="tel" id="lookup-phone" data-i18n-placeholder="booker_history_lookup_phone" required>
+          </div>
+          <button class="btn btn-primary" type="submit" data-i18n="booker_history_lookup_btn"></button>
+        </form>
+        <div id="lookup-error" class="field-error hidden"></div>
+        <div id="lookup-results" class="list" style="margin-top: var(--space-2);"></div>
+      </div>
+    </section>
+  </div>
+</main>
+
+<div id="modal-root"></div>
+
+<script src="/shared/i18n.js"></script>
+<script src="/shared/format.js"></script>
+<script src="/shared/api.js"></script>
+<script src="/shared/calendar.js"></script>
+<script src="/b/page.js"></script>
+</body>
+</html>

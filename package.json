@@ -1,0 +1,16 @@
+{
+  "name": "suvida",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "migrate": "node scripts/migrate.js",
+    "seed": "node scripts/seed.js",
+    "smoke": "node scripts/smoke.js"
+  },
+  "dependencies": {
+    "@libsql/client": "^0.18.0"
+  },
+  "devDependencies": {
+    "vercel": "^59.11.7"
+  }
+}

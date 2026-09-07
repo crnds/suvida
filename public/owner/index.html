@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Suvida — Owner</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+Thai:wght@400;500;600&family=Noto+Sans+Thai:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/shared/theme.css">
+</head>
+<body>
+
+<header class="app-header">
+  <div class="app-header__brand">Suvida — Owner</div>
+  <div class="row">
+    <div id="lang-toggle"></div>
+    <button class="btn btn-ghost btn-sm hidden" id="logout-btn" data-i18n="nav_logout"></button>
+  </div>
+</header>
+
+<main class="app-shell" style="padding-top: var(--space-3);">
+
+  <section id="login-section" class="hidden" style="max-width: 360px; margin: var(--space-8) auto;">
+    <div class="card stack">
+      <h2 class="text-h3" data-i18n="login_title"></h2>
+      <form id="login-form" class="stack">
+        <div class="field">
+          <label for="login-username" data-i18n="login_username"></label>
+          <input class="input" id="login-username" type="text" autocomplete="username" required>
+        </div>
+        <div class="field">
+          <label for="login-password" data-i18n="login_password"></label>
+          <input class="input" id="login-password" type="password" autocomplete="current-password" required>
+        </div>
+        <div id="login-error" class="field-error hidden"></div>
+        <button type="submit" class="btn btn-primary" data-i18n="login_submit"></button>
+      </form>
+    </div>
+  </section>
+
+  <section id="app-section" class="hidden stack">
+    <div class="row-between">
+      <h2 class="text-h2" data-i18n="owner_title"></h2>
+    </div>
+
+    <div class="card">
+      <h3 class="card-title" data-i18n="owner_admin_create_title"></h3>
+      <form id="create-form" class="grid-auto">
+        <div class="field">
+          <label for="ca-username" data-i18n="owner_admin_username"></label>
+          <input class="input" id="ca-username" type="text" required>
+        </div>
+        <div class="field">
+          <label for="ca-password" data-i18n="owner_admin_password"></label>
+          <input class="input" id="ca-password" type="password" required>
+        </div>
+        <div class="field">
+          <label for="ca-display-name" data-i18n="owner_admin_display_name"></label>
+          <input class="input" id="ca-display-name" type="text" required>
+        </div>
+      </form>
+      <div id="create-error" class="field-error hidden" style="margin-top: var(--space-1);"></div>
+      <button type="submit" form="create-form" class="btn btn-primary" style="margin-top: var(--space-2);" data-i18n="owner_admin_create_btn"></button>
+    </div>
+
+    <div id="admins-list" class="list"></div>
+  </section>
+
+</main>
+
+<div id="modal-root"></div>
+
+<script src="/shared/i18n.js"></script>
+<script src="/shared/format.js"></script>
+<script src="/shared/api.js"></script>
+<script src="/owner/app.js"></script>
+</body>
+</html>

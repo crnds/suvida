@@ -1,0 +1,14 @@
+{
+  "rewrites": [
+    { "source": "/b/:slug", "destination": "/b/index.html" },
+    { "source": "/api/owner", "destination": "/api/owner/[...route]" },
+    { "source": "/api/owner/", "destination": "/api/owner/[...route]" },
+    { "source": "/api/owner/:path*", "destination": "/api/owner/[...route]" },
+    { "source": "/api/admin", "destination": "/api/admin/[...route]" },
+    { "source": "/api/admin/", "destination": "/api/admin/[...route]" },
+    { "source": "/api/admin/:path*", "destination": "/api/admin/[...route]" },
+    { "source": "/api/public", "destination": "/api/public/[...route]" },
+    { "source": "/api/public/", "destination": "/api/public/[...route]" },
+    { "source": "/api/public/:path*", "destination": "/api/public/[...route]" }
+  ]
+}

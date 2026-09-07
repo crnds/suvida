@@ -1,0 +1,536 @@
+/* Suvida design system — adapted from DESIGN.md (TypeGallery: cream/brown
+   editorial, flat, 0px radius, no shadows). Brand colours swapped to the
+   live studio site's ivory/charcoal/brass per plan.md's open decision 1, so
+   a student following a link from the studio site doesn't feel they've left
+   it. Typography substituted for Thai coverage: Noto Serif Thai (headings)
+   + Noto Sans Thai (body) replace EB Garamond/Manrope, since neither ships
+   a Thai subset — see plan.md "i18n & design". Structural tokens (spacing
+   unit, 0px radius, 1px borders, chip variants, success/warning/error) are
+   kept unchanged from DESIGN.md. */
+
+:root {
+  --surface: #fbf9f6;
+  --surface-card: #ffffff;
+  --surface-alt: #ede8de;
+  --surface-error: #fdf6f5;
+  --primary: #1a1815;
+  --accent: #a67c3d;
+  --border: #d6cfc4;
+  --border-strong: var(--primary);
+  --text: var(--primary);
+  --text2: #8b7e74;
+  --muted: #b5a99a;
+
+  --color-success: #3d7a4a;
+  --color-warning: #b45309;
+  --color-error: #a44a3f;
+  --color-info: #8b7e74;
+
+  /* Calendar day-card tints. --muted (#b5a99a) reads at only 1.89:1 on
+     --surface-alt, so quiet card text uses --text-quiet (4.95:1) instead. */
+  --surface-success: #eef6f0;
+  --border-success: #cfe0d3;
+  --border-error: #ecd5d1;
+  --text-quiet: #6b6157;
+
+  --radius: 0px;
+  /* Calendar day cards are the one rounded surface — a deliberate exception to
+     DESIGN.md's 0px rule, so a month reads as a field of cards, not a table. */
+  --radius-card: 10px;
+  --shadow: none;
+
+  --space-1: 4px;
+  --space-2: 12px;
+  --space-3: 24px;
+  --space-4: 36px;
+  --space-5: 48px;
+  --space-6: 72px;
+  --space-8: 96px;
+  --space-10: 120px;
+
+  --font-head: 'Noto Serif Thai', 'EB Garamond', serif;
+  --font-body: 'Noto Sans Thai', 'Manrope', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body { margin: 0; padding: 0; }
+
+body {
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-weight: 400;
+  font-size: 16px;
+  line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: var(--accent); }
+
+img { max-width: 100%; display: block; }
+
+/* ── Typography ─────────────────────────────────────────── */
+/* Thai stacks vowels/tone marks above and below the baseline, so DESIGN.md's
+   tight heading leading clips them — minimums here are 1.3 for headings,
+   1.7 for body (plan.md "Thai line-height"). */
+
+h1, h2, h3, .text-hero, .text-h1, .text-h2, .text-h3 {
+  font-family: var(--font-head);
+  font-weight: 500;
+  margin: 0;
+  color: var(--primary);
+}
+
+.text-hero { font-size: clamp(2.5rem, 6vw, 5rem); line-height: 1.3; font-weight: 400; }
+.text-h1, h1 { font-size: clamp(2rem, 5vw, 3.5rem); line-height: 1.3; }
+.text-h2, h2 { font-size: clamp(1.5rem, 3.5vw, 2.25rem); line-height: 1.3; font-weight: 500; }
+.text-h3, h3 { font-size: clamp(1.15rem, 2.5vw, 1.5rem); line-height: 1.3; font-weight: 500; }
+
+.text-body-lg { font-size: 18px; font-weight: 300; line-height: 1.7; }
+.text-body { font-size: 16px; font-weight: 400; line-height: 1.7; }
+.text-caption { font-size: 12px; font-weight: 500; line-height: 1.5; color: var(--text2); }
+
+.tabular-nums { font-variant-numeric: tabular-nums; }
+
+/* ── Layout ─────────────────────────────────────────────── */
+
+.page {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: var(--space-3) var(--space-3) var(--space-8);
+}
+
+.app-shell { max-width: 960px; margin: 0 auto; padding: 0 var(--space-3) var(--space-8); }
+
+.stack { display: flex; flex-direction: column; gap: var(--space-3); }
+.stack-tight { display: flex; flex-direction: column; gap: var(--space-2); }
+.row { display: flex; align-items: center; gap: var(--space-2); }
+.row-between { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.row-wrap { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.grid-auto { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: var(--space-3); }
+
+/* ── Header / nav ───────────────────────────────────────── */
+
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: var(--space-2) var(--space-3);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.app-header__brand { font-family: var(--font-head); font-size: 20px; font-weight: 500; }
+.app-header__meta { color: var(--text2); font-size: 13px; }
+
+.tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  margin-bottom: var(--space-3);
+}
+
+.tab {
+  position: relative;
+  padding: var(--space-2) var(--space-3);
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text2);
+  background: none;
+  border: none;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.15s ease;
+}
+
+.tab:hover { color: var(--primary); }
+
+.tab[aria-selected="true"] {
+  color: var(--primary);
+}
+
+.tab[aria-selected="true"]::after {
+  content: '';
+  position: absolute;
+  left: 0; right: 0; bottom: -1px;
+  height: 2px;
+  background: var(--accent);
+}
+
+.tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  margin-left: var(--space-1);
+  background: var(--color-error);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 999px;
+}
+
+/* ── Buttons ────────────────────────────────────────────── */
+
+.btn {
+  font-family: var(--font-body);
+  font-weight: 500;
+  line-height: 1.4;
+  border-radius: var(--radius);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  height: 40px;
+  padding: 0 24px;
+  font-size: 14px;
+  min-width: 100px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+  flex: none;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+}
+
+.btn-sm { height: 32px; padding: 0 16px; font-size: 12px; min-width: 72px; }
+.btn-lg { height: 48px; padding: 0 32px; font-size: 16px; min-width: 128px; }
+
+.btn-primary { background: var(--primary); color: var(--surface); border-color: var(--primary); }
+.btn-primary:hover:not(:disabled) { background: var(--surface); color: var(--primary); }
+
+.btn-secondary { background: transparent; color: var(--primary); border-color: var(--primary); }
+.btn-secondary:hover:not(:disabled) { background: var(--primary); color: var(--surface); }
+
+.btn-ghost { background: transparent; color: var(--accent); border-color: transparent; }
+.btn-ghost:hover:not(:disabled) { background: var(--surface-alt); }
+
+.btn-destructive { background: var(--color-error); color: #fff; border-color: var(--color-error); }
+.btn-destructive:hover:not(:disabled) { background: var(--surface); color: var(--color-error); }
+
+.btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+.btn:focus-visible, .tab:focus-visible, a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ── Cards ──────────────────────────────────────────────── */
+
+.card {
+  background: var(--surface-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-4);
+  transition: border-color 0.15s ease;
+}
+
+.card--hover:hover { border-color: var(--primary); }
+
+.card-title { font-family: var(--font-head); font-size: 18px; font-weight: 500; margin: 0 0 var(--space-2); }
+
+/* ── Inputs ─────────────────────────────────────────────── */
+
+.field { display: flex; flex-direction: column; gap: var(--space-1); }
+
+.field label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text2);
+}
+
+.input, select.input, textarea.input {
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.4;
+  height: 40px;
+  padding: 0 12px;
+  background: #fff;
+  color: var(--text);
+  border: 1px solid var(--text2);
+  border-radius: var(--radius);
+  width: 100%;
+}
+
+textarea.input { height: auto; padding: 10px 12px; min-height: 80px; }
+
+.input:hover { border-color: var(--primary); }
+.input:focus, .input:focus-visible {
+  outline: none;
+  border: 2px solid var(--accent);
+  padding: 0 11px;
+}
+
+.input.is-error { border-color: var(--color-error); background: var(--surface-error); }
+.input:disabled { border-color: var(--border); background: var(--surface-alt); color: var(--muted); cursor: not-allowed; }
+
+.field-error { font-size: 12px; color: var(--color-error); }
+.field-hint { font-size: 12px; color: var(--text2); }
+
+.checkbox-row { display: flex; align-items: center; gap: var(--space-2); }
+input[type="checkbox"], input[type="radio"] {
+  width: 18px; height: 18px; accent-color: var(--primary);
+}
+input[type="checkbox"]:focus-visible, input[type="radio"]:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
+
+/* ── Chips ──────────────────────────────────────────────── */
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 14px;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+  border: 1px solid var(--border);
+  color: var(--text2);
+  background: transparent;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.chip:hover { background: var(--surface-alt); color: var(--primary); border-color: var(--text2); }
+.chip[aria-pressed="true"] { background: var(--primary); color: var(--surface); border-color: var(--primary); }
+
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+.status-chip::before { content: ''; width: 7px; height: 7px; border-radius: 999px; background: currentColor; }
+
+.status-chip--free { background: var(--color-success); color: #f5f0e8; }
+.status-chip--booked { background: var(--primary); color: var(--surface); }
+.status-chip--moved { background: var(--color-error); color: #f5f0e8; }
+.status-chip--cancelled { background: var(--surface-alt); color: #b5a99a; }
+.status-chip--edited { background: transparent; color: var(--text2); border: 1px solid var(--border); }
+
+/* ── Slot list (one time range per line) ───────────────────── */
+
+.slot-list { display: flex; flex-direction: column; gap: var(--space-1); }
+.slot-list__item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 48px;
+  padding: 0 var(--space-3);
+  font-size: 15px;
+  font-weight: 500;
+  border: 1px solid var(--border);
+  color: var(--text);
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+.slot-list__item:hover { background: var(--surface-alt); color: var(--primary); border-color: var(--text2); }
+
+/* ── Lists ──────────────────────────────────────────────── */
+
+.list { border-top: 1px solid var(--border); }
+.list-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-height: 48px;
+  padding: var(--space-1) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  font-size: 16px;
+}
+.list-row:hover { background: var(--surface-alt); cursor: pointer; }
+.list-row--active { background: var(--primary); color: var(--surface); }
+.list-row--static:hover { background: none; cursor: default; }
+
+/* ── Badges / dots ──────────────────────────────────────── */
+
+.dot { width: 8px; height: 8px; border-radius: 999px; background: var(--color-error); display: inline-block; flex: none; }
+
+.banner {
+  border: 1px solid var(--color-warning);
+  background: #fdf3e7;
+  color: var(--color-warning);
+  padding: var(--space-2) var(--space-3);
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.banner--error { border-color: var(--color-error); background: var(--surface-error); color: var(--color-error); }
+.banner--success { border-color: var(--color-success); background: var(--surface-success); color: var(--color-success); }
+
+/* ── Calendar ───────────────────────────────────────────── */
+
+.calendar-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-2); }
+.calendar-nav__label { font-family: var(--font-head); font-size: 20px; font-weight: 500; }
+
+/* One day = one card. minmax(0,1fr) + min-width:0 stop a long Thai label's
+   min-content width from widening a track and scrolling the page sideways. */
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.calendar-weekday {
+  text-align: center;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text2);
+  padding: 0 0 var(--space-1);
+  letter-spacing: 0.04em;
+}
+
+.calendar-day {
+  background: var(--surface-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  min-height: 88px;
+  min-width: 0;
+  padding: 6px 2px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  cursor: pointer;
+  font-family: var(--font-body);
+  font-size: 11px;
+  line-height: 1.35;
+  text-align: center;
+  width: 100%;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.calendar-day__num { font-family: var(--font-head); font-size: 18px; font-weight: 500; line-height: 1.3; }
+.calendar-day__info { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.calendar-day__slots { font-weight: 500; line-height: 1.35; }
+.calendar-day__counts { display: flex; flex-direction: column; gap: 1px; line-height: 1.35; }
+.calendar-day__dots { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px; max-width: 100%; }
+.calendar-day__dot { width: 8px; height: 8px; border-radius: 999px; background: currentColor; flex: none; }
+/* Admin mixes free/booked/blocked dots on one day, so each needs its own
+   colour instead of inheriting the card's single state colour. */
+.calendar-day__dot.calendar-day__dot--free { background: var(--color-success); }
+.calendar-day__dot.calendar-day__dot--booked { background: var(--primary); }
+.calendar-day__dot.calendar-day__dot--blocked { background: var(--text-quiet); }
+
+/* State fills. Written at (0,2,0) so they outrank `.calendar-day:disabled`,
+   which most closed and every past day also matches. */
+.calendar-day.calendar-day--free { background: var(--surface-success); border-color: var(--border-success); color: var(--color-success); }
+.calendar-day.calendar-day--full { background: var(--surface-error); border-color: var(--border-error); color: var(--color-error); }
+.calendar-day.calendar-day--closed { background: var(--surface-alt); border-color: transparent; color: var(--text-quiet); }
+.calendar-day.calendar-day--past { background: var(--surface); border-color: var(--border); color: var(--text-quiet); }
+/* A past day's availability is noise — keep the date, drop the label. */
+.calendar-day--past .calendar-day__info,
+.calendar-day--past .calendar-day__counts { display: none; }
+
+.calendar-day__count--free { color: var(--color-success); }
+.calendar-day__count--booked { color: var(--primary); }
+.calendar-day__count--blocked { color: var(--text-quiet); }
+
+/* Ring rather than a border: `--today` co-occurs with a state class, and an
+   inset shadow can't fight it over border-color. Follows border-radius. */
+.calendar-day--today { box-shadow: inset 0 0 0 2px var(--primary); }
+
+.calendar-day:hover:not(:disabled) { border-color: var(--primary); }
+.calendar-day:disabled { cursor: default; }
+/* Inset, because half the 6px grid gap is less than the theme's 2px offset. */
+.calendar-day:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* ── Modal ──────────────────────────────────────────────── */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(26, 24, 21, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-3);
+  z-index: 100;
+}
+
+.modal {
+  background: var(--surface-card);
+  border: 1px solid var(--border);
+  width: 100%;
+  max-width: 480px;
+  max-height: 88vh;
+  overflow-y: auto;
+  padding: var(--space-3);
+}
+
+.modal__header { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-3); }
+.modal__close { background: none; border: none; font-size: 20px; cursor: pointer; color: var(--text2); line-height: 1; padding: var(--space-1); }
+.modal__close:hover { color: var(--primary); }
+
+/* ── Loading ────────────────────────────────────────────── */
+
+.spinner {
+  width: 20px; height: 20px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 999px;
+  animation: spin 0.7s linear infinite;
+  display: inline-block;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.loading-row { display: flex; align-items: center; gap: var(--space-2); color: var(--text2); padding: var(--space-3) 0; }
+
+.empty-state { color: var(--text2); text-align: center; padding: var(--space-5) var(--space-2); }
+
+/* ── Utility ────────────────────────────────────────────── */
+
+.muted { color: var(--text2); }
+.error-text { color: var(--color-error); }
+.success-text { color: var(--color-success); }
+.hidden { display: none !important; }
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+}
+
+/* ── Responsive ─────────────────────────────────────────── */
+
+@media (max-width: 768px) {
+  .page { padding: var(--space-2) var(--space-2) var(--space-6); }
+  .app-shell { padding: 0 var(--space-2) var(--space-6); }
+}
+
+@media (max-width: 480px) {
+  .btn { min-width: 0; }
+  .modal { padding: var(--space-2); }
+  /* Claw back horizontal room so seven cards keep a ~48px tap width. */
+  .page { padding-left: var(--space-1); padding-right: var(--space-1); }
+  .app-shell { padding-left: var(--space-1); padding-right: var(--space-1); }
+  .calendar-grid { gap: 4px; }
+  .calendar-day { padding: 6px 1px; }
+  .calendar-day__num { font-size: 16px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
