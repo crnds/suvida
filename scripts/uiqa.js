@@ -85,6 +85,15 @@ function weekdayOfISO(dateStr) {
   const [y, m, d] = dateStr.split('-').map(Number);
   return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
 }
+function shiftMonthISO(dateStr, deltaMonths) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const totalMonths = (y * 12 + (m - 1)) + deltaMonths;
+  const ny = Math.floor(totalMonths / 12);
+  const nm = totalMonths % 12; // 0-11
+  const daysInNm = new Date(Date.UTC(ny, nm + 1, 0)).getUTCDate();
+  const clampedDay = Math.min(d, daysInNm);
+  return `${ny}-${String(nm + 1).padStart(2, '0')}-${String(clampedDay).padStart(2, '0')}`;
+}
 
 // ── result tracking ─────────────────────────────────────────
 
@@ -847,28 +856,56 @@ async function runFlows() {
     await page.close();
   });
 
-  // 19. PageDown crosses a month boundary and focus lands on a real day
-  // cell in the new month, not on <body>.
+  // 19. PageDown/PageUp cross a month boundary and focus lands on the
+  // exact expected day in the new month (same day-of-month, clamped) — not
+  // just *some* day cell, which the previous assertion couldn't tell apart
+  // from a wrong-day landing. Also covers hand-off §5.1's "→ on the 31st"
+  // arrow-key crossing case, which PageUp/PageDown alone don't exercise.
   await flow(19, async () => {
     const page = await newPage();
     await page.goto(`${BASE}/b/${SLUG}`, { waitUntil: 'networkidle2' });
     await page.waitForSelector(OPEN_DAY);
 
-    const startLabel = await page.$eval('.calendar-nav__label', (n) => n.textContent);
-    await page.$eval('.calendar-day[tabindex="0"]', (el) => el.focus());
+    const waitForLabelChange = async (prevLabel) => {
+      await page.waitForFunction(
+        (prev) => document.querySelector('.calendar-nav__label')?.textContent !== prev,
+        { timeout: 8000 }, prevLabel,
+      );
+      await page.waitForFunction(() => !!document.activeElement?.closest?.('.calendar-day'), { timeout: 8000 });
+      return page.evaluate(() => document.activeElement.closest('.calendar-day').dataset.date);
+    };
 
+    // PageDown. Nothing has DOM focus yet on a freshly loaded page (the
+    // tabindex="0" cell is a tab stop, not automatically focused), and the
+    // grid's keydown listener only fires for events targeting inside the
+    // grid — so this must explicitly focus the cell before sending the key.
+    let label = await page.$eval('.calendar-nav__label', (n) => n.textContent);
+    const from = await page.$eval('.calendar-day[tabindex="0"]', (el) => { el.focus(); return el.dataset.date; });
     await page.keyboard.press('PageDown');
-    await page.waitForFunction(
-      (prev) => document.querySelector('.calendar-nav__label')?.textContent !== prev,
-      { timeout: 8000 }, startLabel,
-    );
-    await page.waitForFunction(
-      () => !!document.activeElement?.closest?.('.calendar-day'),
-      { timeout: 8000 },
-    );
-    const landedDate = await page.evaluate(() => document.activeElement.closest('.calendar-day').dataset.date);
-    check('booker: PageDown lands focus on a day cell in the next month',
-      !!landedDate && landedDate.slice(0, 7) !== startLabel, landedDate);
+    let landed = await waitForLabelChange(label);
+    let expected = shiftMonthISO(from, 1);
+    check('booker: PageDown lands on the expected day in the next month',
+      landed === expected, `${from} -> ${landed} (expected ${expected})`);
+
+    // PageUp, from wherever PageDown just landed
+    label = await page.$eval('.calendar-nav__label', (n) => n.textContent);
+    const beforeUp = landed;
+    await page.keyboard.press('PageUp');
+    landed = await waitForLabelChange(label);
+    expected = shiftMonthISO(beforeUp, -1);
+    check('booker: PageUp lands on the expected day in the previous month',
+      landed === expected, `${beforeUp} -> ${landed} (expected ${expected})`);
+
+    // Arrow-key crossing: ArrowRight off the last day of the month must
+    // land on the 1st of the next month (hand-off §5.1's "→ on the 31st").
+    label = await page.$eval('.calendar-nav__label', (n) => n.textContent);
+    const lastDay = await page.$$eval('.calendar-day', (els) => els[els.length - 1].dataset.date);
+    await page.evaluate((d) => document.querySelector(`.calendar-day[data-date="${d}"]`)?.focus(), lastDay);
+    await page.keyboard.press('ArrowRight');
+    landed = await waitForLabelChange(label);
+    expected = shiftISO(lastDay, 1);
+    check('booker: ArrowRight off the last day of the month lands on the 1st of the next month',
+      landed === expected, `${lastDay} -> ${landed} (expected ${expected})`);
 
     await page.close();
   });
@@ -879,6 +916,15 @@ async function runFlows() {
     const page = await newPage();
     await page.goto(`${BASE}/b/${SLUG}`, { waitUntil: 'networkidle2' });
     await page.waitForSelector(OPEN_DAY);
+
+    // Positive path: Enter on an available day must activate it exactly
+    // like a click does (flow 1 covers the click path).
+    await page.$eval(OPEN_DAY, (el) => el.focus());
+    await page.keyboard.press('Enter');
+    await page.waitForSelector('.slot-list__item', { timeout: 5000 });
+    check('booker: Enter on an available day opens its slot list', true);
+    await page.keyboard.press('Escape');
+    await wait(250);
 
     const past = await page.$('.calendar-day--past');
     check('booker: a past day cell exists to test against', !!past);
@@ -904,13 +950,22 @@ async function runFlows() {
 
     await page.$eval('.calendar-day[tabindex="0"]', (el) => el.focus());
     const before = await page.evaluate(() => document.activeElement.dataset.date);
+    const prevLabel = await page.$eval('.calendar-nav__label', (n) => n.textContent);
     // A real click on #lang-toggle would move DOM focus to the toggle
     // button itself (standard browser click-then-focus ordering), which
     // would make this test conflate "a different element legitimately has
     // focus" with "render() failed to preserve a day cell's focus" — drive
-    // the same code path flow 2 uses instead.
-    await page.evaluate(() => I18N.setLang('en'));
-    await wait(300);
+    // the same code path flow 2 uses instead. Toggle to whichever language
+    // isn't already active — flow 2 earlier in the suite switches the site
+    // to 'en' and nothing resets it, so hardcoding 'en' here would be a
+    // no-op (same language in, same language out) and never exercise the
+    // re-render this flow exists to guard.
+    const nextLang = (await page.evaluate(() => I18N.lang)) === 'en' ? 'th' : 'en';
+    await page.evaluate((l) => I18N.setLang(l), nextLang);
+    await page.waitForFunction(
+      (prev) => document.querySelector('.calendar-nav__label')?.textContent !== prev,
+      { timeout: 8000 }, prevLabel,
+    );
     const after = await page.evaluate(() => document.activeElement?.dataset?.date);
     check('booker: focus survives a language toggle', after === before, `${before} -> ${after}`);
 
@@ -934,7 +989,8 @@ async function runFlows() {
     await page.close();
   });
 
-  // 23. Same month-crossing focus guarantee, on admin.
+  // 23. Same month-crossing focus guarantee, on admin — verifies the exact
+  // landed day, not just "some day cell has focus" (see flow 19's comment).
   await flow(23, async () => {
     const page = await newPage({ width: 1100 });
     await signIn(page);
@@ -942,7 +998,10 @@ async function runFlows() {
     await page.waitForSelector('.calendar-day', { timeout: 8000 });
 
     const startLabel = await page.$eval('.calendar-nav__label', (n) => n.textContent);
-    await page.$eval('.calendar-day[tabindex="0"]', (el) => el.focus());
+    // Explicitly focus first — nothing has DOM focus on a freshly loaded
+    // page, and the grid's keydown listener only fires for events targeting
+    // inside the grid (see flow 19's comment).
+    const from = await page.$eval('.calendar-day[tabindex="0"]', (el) => { el.focus(); return el.dataset.date; });
     await page.keyboard.press('PageDown');
     await page.waitForFunction(
       (prev) => document.querySelector('.calendar-nav__label')?.textContent !== prev,
@@ -950,8 +1009,9 @@ async function runFlows() {
     );
     await page.waitForFunction(() => !!document.activeElement?.closest?.('.calendar-day'), { timeout: 8000 });
     const landedDate = await page.evaluate(() => document.activeElement.closest('.calendar-day').dataset.date);
-    check('admin: PageDown lands focus on a day cell in the next month',
-      !!landedDate && landedDate.slice(0, 7) !== startLabel, landedDate);
+    const expected = shiftMonthISO(from, 1);
+    check('admin: PageDown lands on the expected day in the next month',
+      landedDate === expected, `${from} -> ${landedDate} (expected ${expected})`);
 
     await page.close();
   });

@@ -222,6 +222,7 @@ function createMonthCalendar(container, handlers) {
     }
 
     grid.addEventListener('keydown', (e) => {
+      if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
       const btn = e.target.closest('.calendar-day');
       if (!btn) return;
       const date = btn.dataset.date;
