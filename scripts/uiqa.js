@@ -748,6 +748,28 @@ async function runFlows() {
       (n) => new Set([...n.querySelectorAll('.calendar-day, .calendar-day-blank')].map((c) => c.getBoundingClientRect().left)).size);
     check('booker: grid still lays out as 7 columns', columns === 7, String(columns));
 
+    // The checks above query DOM attributes (getAttribute('role')), which
+    // would report "found it" even if a browser bug dropped the role from
+    // the *actual* computed accessibility tree — display: contents has a
+    // documented history of doing exactly that. page.accessibility.snapshot
+    // reads the real AOM via CDP's Accessibility domain, so this is the
+    // only check here that can catch a pruned role.
+    const gridEl = await page.$('.calendar-grid');
+    const snapshot = await page.accessibility.snapshot({ root: gridEl, interestingOnly: false });
+    const roleCounts = {};
+    (function walk(node) {
+      if (!node) return;
+      roleCounts[node.role] = (roleCounts[node.role] || 0) + 1;
+      (node.children || []).forEach(walk);
+    })(snapshot);
+    check('booker: computed AOM role of .calendar-grid is "grid"',
+      snapshot?.role === 'grid', snapshot?.role);
+    check('booker: computed AOM contains "row" nodes, one per DOM row',
+      roleCounts.row === rowCellCounts.length, `AOM rows: ${roleCounts.row}, DOM rows: ${rowCellCounts.length}`);
+    check('booker: computed AOM contains gridcell/columnheader nodes',
+      (roleCounts.gridcell || 0) > 0 && (roleCounts.columnheader || 0) === 7,
+      `gridcell: ${roleCounts.gridcell}, columnheader: ${roleCounts.columnheader}`);
+
     await page.close();
   });
 
