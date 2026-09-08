@@ -39,7 +39,7 @@ export async function getHistory(req, res) {
   // should make a dangling location_id unreachable, but this tolerates one
   // the same way the rest of the app tolerates a dangling slot_id.
   const result = await db.execute({
-    sql: `SELECT b.id, s.start_unix, b.booker_name, s.location_id, l.title AS location_title
+    sql: `SELECT b.id, s.start_unix, b.booker_name, s.location_id, l.title AS location_title, l.title_th AS location_title_th
             FROM bookings b
             JOIN slots s ON s.id = b.slot_id
             LEFT JOIN locations l ON l.id = s.location_id

@@ -176,6 +176,16 @@ async function ensureLocationColumns(client) {
   }
 }
 
+// Optional Thai display label for a location, alongside its (language-
+// neutral) `title`. Nullable — an admin who never sets it just sees `title`
+// everywhere; the client picks between the two (see i18n.js's `localized`).
+async function ensureLocationTitleThColumn(client) {
+  const l = await client.execute('PRAGMA table_info(locations)');
+  if (!l.rows.some((r) => r.name === 'title_th')) {
+    await client.execute('ALTER TABLE locations ADD COLUMN title_th TEXT');
+  }
+}
+
 // One-time backfill for admins/rows that predate the locations feature.
 // Idempotent: every guard here (NOT EXISTS / location_id IS NULL) matches
 // nothing once the backfill has already run, so re-running is a no-op.
@@ -209,6 +219,7 @@ async function main() {
   const client = createClient({ url, authToken: process.env.TURSO_AUTH_TOKEN });
   await client.executeMultiple(SCHEMA);
   await ensureLocationColumns(client);
+  await ensureLocationTitleThColumn(client);
   // Must run after ensureLocationColumns: on a fresh DB the CREATE TABLE
   // statements above don't declare location_id (see ensureLocationColumns),
   // so indexing it any earlier fails with "no such column".

@@ -173,8 +173,7 @@ const UI = (() => {
   // ── loading & empty ─────────────────────────────────────
   function loadingRow() {
     return el('div', { class: 'loading-row' }, [
-      el('span', { class: 'spinner', attrs: { 'aria-hidden': 'true' } }),
-      el('span', { text: t('common_loading') }),
+      el('span', { class: 'spinner', attrs: { role: 'status', 'aria-label': t('common_loading') } }),
     ]);
   }
 

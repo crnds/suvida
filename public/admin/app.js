@@ -71,6 +71,7 @@ const els = {
   locationList: document.getElementById('location-list'),
   locationForm: document.getElementById('location-form'),
   locTitle: document.getElementById('loc-title'),
+  locTitleTh: document.getElementById('loc-title-th'),
   locationError: document.getElementById('location-error'),
 
   adminLocationFilter: document.getElementById('admin-location-filter'),
@@ -113,6 +114,7 @@ document.addEventListener('i18n:changed', () => {
   else renderCalendar();
   renderLog();
   renderLocations();
+  populateLocationSelect(els.tfLocation);
   renderLocationFilterBar();
   els.shareCopyLabel.textContent = I18N.t('settings_share_copy');
   els.adminLocationFilter.setAttribute('aria-label', I18N.t('calendar_filter_location_label'));
@@ -227,7 +229,7 @@ function populateLocationSelect(selectEl) {
   STATE.locations.forEach((loc) => {
     const opt = document.createElement('option');
     opt.value = String(loc.id);
-    opt.textContent = loc.title;
+    opt.textContent = I18N.localized(loc.title, loc.title_th);
     selectEl.appendChild(opt);
   });
 }
@@ -265,33 +267,97 @@ function renderTemplate() {
     UI.el('div', { class: 'week-grid__day-head', text: I18N.weekdayShort(weekday) }),
     ...entries.map((entry) => {
       const loc = STATE.locations.find((l) => l.id === entry.location_id);
-      const delBtn = UI.button({
-        kind: 'tertiary', size: 'sm', iconOnly: true, icon: 'trash',
-        ariaLabel: I18N.t('common_delete'),
-      });
-      const row = UI.el('div', { class: 'week-grid__slot' }, [
-        UI.el('div', { class: 'week-grid__slot-main' }, [
-          UI.el('div', { class: 'tabular-nums', text: minutesToTimeInput(entry.start_minutes) }),
-          loc ? UI.el('span', { class: 'week-grid__slot-meta', text: I18N.localized(loc.title, loc.title_th) }) : null,
-        ]),
-        delBtn,
+      const card = UI.el('button', { class: 'week-grid__slot', attrs: { type: 'button' } }, [
+        UI.el('div', { class: 'week-grid__slot-time tabular-nums', text: minutesToTimeInput(entry.start_minutes) }),
+        loc ? UI.el('span', { class: 'week-grid__slot-meta', text: I18N.localized(loc.title, loc.title_th) }) : null,
       ]);
-      delBtn.addEventListener('click', async () => {
-        await UI.withBusy(delBtn, async () => {
-          try {
-            await Api.removeTemplateEntry(entry.id);
-            STATE.template = STATE.template.filter((t) => t.id !== entry.id);
-            renderTemplate();
-            UI.toast('success', I18N.t('schedule_template_removed'));
-          } catch (err) {
-            UI.toastError(err);
-          }
-        });
-      });
-      return row;
+      card.addEventListener('click', () => openEditTemplateModal(entry));
+      return card;
     }),
   ])));
   els.templateList.replaceChildren(grid);
+}
+
+// Time, location or delete for one template entry — the trash button that
+// used to live inline on the card now lives here instead (plan.md-style
+// single click surface per card).
+function openEditTemplateModal(entry) {
+  const timeInput = UI.el('input', {
+    class: 'input',
+    attrs: { id: 'tmpl-edit-time', type: 'time', step: '1800', required: true },
+  });
+  timeInput.value = minutesToTimeInput(entry.start_minutes);
+
+  const locationSelect = UI.el('select', { class: 'input', attrs: { id: 'tmpl-edit-location' } });
+  populateLocationSelect(locationSelect);
+  locationSelect.value = String(entry.location_id);
+
+  const errorBox = UI.el('div');
+  const submit = UI.el('button', {
+    class: 'btn btn-primary btn-block',
+    attrs: { type: 'submit' },
+  }, [UI.icon('check'), UI.el('span', { text: I18N.t('common_save') })]);
+
+  const form = UI.el('form', { class: 'stack-tight', attrs: { novalidate: true } }, [
+    UI.el('div', { class: 'field' }, [
+      UI.el('label', { text: I18N.t('schedule_template_add_time'), attrs: { for: 'tmpl-edit-time' } }),
+      timeInput,
+    ]),
+    UI.el('div', { class: 'field' }, [
+      UI.el('label', { text: I18N.t('schedule_template_add_location'), attrs: { for: 'tmpl-edit-location' } }),
+      locationSelect,
+    ]),
+    submit,
+  ]);
+
+  const deleteBtn = UI.button({
+    kind: 'destructive', block: true, icon: 'trash', label: I18N.t('common_delete'),
+  });
+
+  const handle = showModal(I18N.t('schedule_template_edit_title'),
+    UI.el('div', { class: 'stack-tight' }, [errorBox, form, deleteBtn]));
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    UI.clearBanner(errorBox);
+    const start_minutes = timeInputToMinutes(timeInput.value);
+    const location_id = Number(locationSelect.value);
+    // Same footgun guard as #template-form: an empty select yields Number('') === 0.
+    if (!(location_id > 0)) {
+      showError(errorBox, I18N.t('schedule_template_no_locations_hint'));
+      return;
+    }
+    await UI.withBusy(submit, async () => {
+      try {
+        const updated = await Api.editTemplateEntry(entry.id, entry.weekday, start_minutes, location_id);
+        const idx = STATE.template.findIndex((t) => t.id === entry.id);
+        if (idx !== -1) STATE.template[idx] = { ...STATE.template[idx], ...updated };
+        handle.close();
+        renderTemplate();
+        UI.toast('success', I18N.t('schedule_template_updated'));
+      } catch (err) {
+        showError(errorBox, err.status === 409 ? I18N.t('schedule_template_entry_exists') : err);
+      }
+    });
+  });
+
+  deleteBtn.addEventListener('click', async () => {
+    await UI.confirmThen(deleteBtn, {
+      title: I18N.t('common_delete'),
+      message: I18N.t('schedule_template_delete_confirm'),
+      confirmLabel: I18N.t('common_delete'),
+    }, async () => {
+      try {
+        await Api.removeTemplateEntry(entry.id);
+        STATE.template = STATE.template.filter((t) => t.id !== entry.id);
+        handle.close();
+        renderTemplate();
+        UI.toast('success', I18N.t('schedule_template_removed'));
+      } catch (err) {
+        UI.toastError(err);
+      }
+    });
+  });
 }
 
 // Shows a message in a .field-error node, with an icon and an alert role.
@@ -419,11 +485,16 @@ function renderLocations() {
   }
 
   els.locationList.replaceChildren(...STATE.locations.map((loc) => {
+    const editBtn = UI.button({
+      kind: 'tertiary', size: 'sm', iconOnly: true, icon: 'pen',
+      ariaLabel: `${I18N.t('common_edit')} — ${loc.title}`,
+    });
     const delBtn = UI.button({
       kind: 'tertiary', size: 'sm', iconOnly: true, icon: 'trash',
       ariaLabel: `${I18N.t('common_delete')} — ${loc.title}`,
     });
-    const row = UI.listRow({ main: loc.title, actions: [delBtn] });
+    const row = UI.listRow({ main: loc.title, meta: loc.title_th || '', actions: [editBtn, delBtn] });
+    editBtn.addEventListener('click', () => openEditLocationModal(loc));
     delBtn.addEventListener('click', async () => {
       // confirmThen keeps the button disabled across the dialog too — see
       // ui.js. Otherwise a double-tap stacked two confirms and ran twice.
@@ -448,16 +519,75 @@ function renderLocations() {
   }));
 }
 
+function openEditLocationModal(loc) {
+  const titleInput = UI.el('input', {
+    class: 'input',
+    attrs: { id: 'loc-edit-title', type: 'text', required: true, maxlength: String(MAX_TEXT_LENGTH) },
+  });
+  titleInput.value = loc.title;
+  const titleThInput = UI.el('input', {
+    class: 'input',
+    attrs: { id: 'loc-edit-title-th', type: 'text', maxlength: String(MAX_TEXT_LENGTH) },
+  });
+  titleThInput.value = loc.title_th || '';
+
+  const errorBox = UI.el('div');
+  const submit = UI.el('button', {
+    class: 'btn btn-primary btn-block',
+    attrs: { type: 'submit' },
+  }, [UI.icon('check'), UI.el('span', { text: I18N.t('common_save') })]);
+
+  const form = UI.el('form', { class: 'stack-tight', attrs: { novalidate: true } }, [
+    UI.el('div', { class: 'field' }, [
+      UI.el('label', { text: I18N.t('settings_locations_add_label'), attrs: { for: 'loc-edit-title' } }),
+      titleInput,
+    ]),
+    UI.el('div', { class: 'field' }, [
+      UI.el('label', { text: I18N.t('settings_locations_add_label_th'), attrs: { for: 'loc-edit-title-th' } }),
+      titleThInput,
+      UI.el('div', { class: 'field-hint', text: I18N.t('settings_locations_add_label_th_hint') }),
+    ]),
+    submit,
+  ]);
+
+  const handle = showModal(I18N.t('settings_locations_edit_title'), UI.el('div', { class: 'stack-tight' }, [errorBox, form]));
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    UI.clearBanner(errorBox);
+    const titleValue = titleInput.value.trim();
+    if (!titleValue) { titleInput.focus(); return; }
+    const titleThValue = titleThInput.value.trim();
+    await UI.withBusy(submit, async () => {
+      try {
+        const updated = await Api.editLocation(loc.id, titleValue, titleThValue);
+        const idx = STATE.locations.findIndex((l) => l.id === loc.id);
+        if (idx !== -1) STATE.locations[idx] = { ...STATE.locations[idx], ...updated };
+        handle.close();
+        renderLocations();
+        populateLocationSelect(els.tfLocation);
+        renderTemplate();
+        renderLocationFilterBar();
+        UI.toast('success', I18N.t('settings_locations_updated'));
+      } catch (err) {
+        showError(errorBox, messageForError(err));
+      }
+    });
+  });
+}
+
 els.locationForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   setFieldMessage(els.locationError, '');
   const title = els.locTitle.value.trim();
   if (!title) { els.locTitle.focus(); return; }
+  const titleTh = els.locTitleTh.value.trim();
   await UI.withBusy(els.locSubmit, async () => {
     try {
-      const created = await Api.addLocation(title);
+      const created = await Api.addLocation(title, titleTh);
       STATE.locations.push(created);
       els.locTitle.value = '';
+      els.locTitleTh.value = '';
       renderLocations();
       populateLocationSelect(els.tfLocation);
       renderLocationFilterBar();
@@ -488,7 +618,7 @@ function renderLocationFilterBar() {
   };
 
   els.adminLocationFilter.appendChild(chip(I18N.t('calendar_filter_all_locations'), null));
-  STATE.locations.forEach((loc) => els.adminLocationFilter.appendChild(chip(loc.title, loc.id)));
+  STATE.locations.forEach((loc) => els.adminLocationFilter.appendChild(chip(I18N.localized(loc.title, loc.title_th), loc.id)));
 }
 
 function setCalendarLocationFilter(id) {
@@ -748,7 +878,7 @@ function renderSlotRow(dateStr, slot, allSlots) {
     metaNode = UI.el('div', { class: 'list-row__meta' }, [
       UI.icon('phone'),
       UI.el('span', { class: 'tabular-nums', text: ` ${slot.booking.booker_phone}` }),
-      slot.location_title ? UI.el('span', { text: ` · ${slot.location_title}` }) : null,
+      slot.location_title ? UI.el('span', { text: ` · ${I18N.localized(slot.location_title, slot.location_title_th)}` }) : null,
     ]);
     actions = [
       slotActionBtn('tertiary', 'pen', I18N.t('day_panel_booking_edit'),
@@ -779,7 +909,7 @@ function renderSlotRow(dateStr, slot, allSlots) {
     ]);
     metaNode = slot.location_title
       ? UI.el('div', { class: 'list-row__meta' }, [
-          UI.icon('location-dot'), UI.el('span', { text: ` ${slot.location_title}` }),
+          UI.icon('location-dot'), UI.el('span', { text: ` ${I18N.localized(slot.location_title, slot.location_title_th)}` }),
         ])
       : null;
     actions = [
@@ -838,9 +968,12 @@ function openBookingModal({ title, name = '', phone = '', submitLabel, onSubmit 
   const phoneInput = UI.el('input', {
     class: 'input',
     attrs: { id: 'bk-phone', type: 'tel', inputmode: 'tel', required: true, autocomplete: 'tel',
-             maxlength: '20' },
+             maxlength: '20', placeholder: I18N.t('booker_form_phone_placeholder') },
   });
-  phoneInput.value = phone;
+  // Stored numbers are canonical digits, so they need the same mask the
+  // teacher's own typing gets (shared/validate.js).
+  phoneInput.value = formatThaiPhone(phone);
+  phoneInput.addEventListener('input', () => applyPhoneMask(phoneInput));
 
   const errorBox = UI.el('div');
   // Per-field errors, matching the booker form. This form previously had none

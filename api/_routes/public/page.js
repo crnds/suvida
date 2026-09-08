@@ -49,7 +49,7 @@ export async function getPage(req, res) {
       return;
     }
     const result = await db.execute({
-      sql: `SELECT s.id, s.start_unix, s.location_id, l.title AS location_title
+      sql: `SELECT s.id, s.start_unix, s.location_id, l.title AS location_title, l.title_th AS location_title_th
               FROM slots s
               LEFT JOIN locations l ON l.id = s.location_id
              WHERE s.admin_id = ? AND s.start_unix >= ? AND s.start_unix < ?
@@ -87,7 +87,7 @@ export async function getPage(req, res) {
       days[dateStr] = (days[dateStr] ?? 0) + 1;
     }
     const locations = await db.execute({
-      sql: 'SELECT id, title FROM locations WHERE admin_id = ? ORDER BY id',
+      sql: 'SELECT id, title, title_th FROM locations WHERE admin_id = ? ORDER BY id',
       args: [adminId],
     });
     res.status(200).json({ display_name: admin.rows[0].display_name, days, locations: locations.rows });

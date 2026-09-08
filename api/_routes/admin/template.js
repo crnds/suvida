@@ -52,6 +52,48 @@ export async function addTemplateEntry(req, res) {
   res.status(201).json({ id: Number(result.lastInsertRowid), weekday, start_minutes, location_id: locationId });
 }
 
+// Same atomic-guard shape as addTemplateEntry's INSERT...SELECT...NOT EXISTS:
+// one UPDATE enforces ownership of the row, ownership of the new location,
+// and no *other* row already holding this (weekday, start_minutes) — never
+// split into a read-then-write pair (CLAUDE.md "Race safety").
+export async function editTemplateEntry(req, res, params) {
+  const id = Number(params.id);
+  const { weekday, start_minutes, location_id } = req.body ?? {};
+  const locationId = Number(location_id);
+  if (!isId(id) || !isValidWeekday(weekday) || !isValidStartMinutes(start_minutes) || !isId(locationId)) {
+    badRequest(res);
+    return;
+  }
+  const db = getDb();
+  const result = await db.execute({
+    sql: `UPDATE templates
+             SET weekday = ?, start_minutes = ?, location_id = ?
+           WHERE id = ? AND admin_id = ?
+             AND EXISTS (SELECT 1 FROM locations l WHERE l.id = ? AND l.admin_id = ?)
+             AND NOT EXISTS (
+               SELECT 1 FROM templates WHERE admin_id = ? AND weekday = ? AND start_minutes = ? AND id != ?
+             )`,
+    args: [weekday, start_minutes, locationId, id, req.adminId, locationId, req.adminId, req.adminId, weekday, start_minutes, id],
+  });
+  if (result.rowsAffected === 0) {
+    const rowOk = await db.execute({
+      sql: 'SELECT 1 FROM templates WHERE id = ? AND admin_id = ?',
+      args: [id, req.adminId],
+    });
+    if (!rowOk.rows[0]) {
+      res.status(404).json({ error: 'not_found' });
+      return;
+    }
+    const locOk = await db.execute({
+      sql: 'SELECT 1 FROM locations WHERE id = ? AND admin_id = ?',
+      args: [locationId, req.adminId],
+    });
+    res.status(locOk.rows[0] ? 409 : 400).json({ error: locOk.rows[0] ? 'entry_exists' : 'invalid_location' });
+    return;
+  }
+  res.status(200).json({ id, weekday, start_minutes, location_id: locationId });
+}
+
 // Removing a template entry never touches already-materialised slots —
 // template edits do not retro-apply (plan.md Key flows §1).
 export async function removeTemplateEntry(req, res, params) {

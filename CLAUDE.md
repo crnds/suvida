@@ -55,7 +55,8 @@ The full spec lives in two files at the project root — **read them before maki
   selected state is styled from ARIA attributes (`[aria-selected]`,
   `[aria-pressed]`), never from a class.
 - **New shared modules, added in the refactor pass — use them rather than
-  re-deriving:** `api/_lib/validate.js` (id / text / phone-shape guards),
+  re-deriving:** `api/_lib/validate.js` (id / text guards), `api/_lib/phone.js`
+  (the Thai phone shape + canonicalisation, mirrored client-side),
   `api/_lib/respond.js` (`badRequest`, `rateLimited`, `conflictOrMissing`),
   `api/_lib/slug.js`, `api/_lib/overlap.js`, `api/_lib/handler.js`
   (`withErrorBoundary`, `noStore` — every entry point is wrapped), and

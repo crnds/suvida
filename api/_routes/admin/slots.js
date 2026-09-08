@@ -29,7 +29,7 @@ export async function listSlots(req, res) {
       return;
     }
     const result = await db.execute({
-      sql: `SELECT s.id, s.start_unix, s.source, s.blocked, s.location_id, l.title AS location_title,
+      sql: `SELECT s.id, s.start_unix, s.source, s.blocked, s.location_id, l.title AS location_title, l.title_th AS location_title_th,
                    b.id AS booking_id, b.booker_name, b.booker_phone
               FROM slots s
               LEFT JOIN locations l ON l.id = s.location_id
@@ -46,6 +46,7 @@ export async function listSlots(req, res) {
       blocked: r.blocked,
       location_id: r.location_id,
       location_title: r.location_title,
+      location_title_th: r.location_title_th,
       booking: r.booking_id
         ? { id: r.booking_id, booker_name: r.booker_name, booker_phone: r.booker_phone }
         : null,

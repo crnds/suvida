@@ -511,7 +511,7 @@ h1, h2, h3, h4, .text-hero, .text-h1, .text-h2, .text-h3 {
 .btn-tertiary[data-loading="true"]::before,
 .btn-ghost[data-loading="true"]::before { color: var(--primary); }
 
-:where(.btn, .tab, .chip, .calendar-day, .slot-list__item, .list-row, a, input, select, textarea, [tabindex]):focus-visible {
+:where(.btn, .tab, .chip, .calendar-day, .slot-list__item, .week-grid__slot, .list-row, a, input, select, textarea, [tabindex]):focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
@@ -751,12 +751,11 @@ input[type="checkbox"], input[type="radio"] {
 
 /* ── Week grid (schedule template: one column per weekday) ─ */
 
-.week-grid-scroll { overflow-x: auto; }
-
 .week-grid {
   display: grid;
-  grid-template-columns: repeat(7, minmax(120px, 1fr));
-  gap: var(--space-2);
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 0;
+  width: 100%;
 }
 
 .week-grid__day {
@@ -780,18 +779,31 @@ input[type="checkbox"], input[type="radio"] {
   border-bottom: var(--border-w) solid var(--border-subtle);
 }
 
+/* A real <button> card, not a row — each stacks inside its day column and is
+   the sole click target that opens the edit/delete modal (no inline
+   delete button here any more). */
 .week-grid__slot {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-1);
-  padding: var(--space-icon) 0;
-  border-bottom: var(--border-w) solid var(--border-subtle);
-  font-size: 13px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+  padding: 2px 4px;
+  border: var(--border-w) solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-card);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
-.week-grid__slot:last-child { border-bottom: none; }
-.week-grid__slot-main { min-width: 0; }
-.week-grid__slot-meta { display: block; font-size: 11px; color: var(--text2); }
+.week-grid__slot:hover { background: var(--surface-alt); border-color: var(--primary); }
+.week-grid__slot:active { background: var(--surface-alt); }
+
+.week-grid__slot-time { font-size: 11px; }
+.week-grid__slot-meta { display: block; font-size: 10px; color: var(--text2); }
 
 /* ── Banners ────────────────────────────────────────────── */
 
@@ -972,6 +984,7 @@ body.is-modal-open { overflow: hidden; }
   /* dvh, not vh: on iOS Safari the URL bar is inside vh, so an 88vh sheet
      could exceed the visible viewport and hide its own action button. */
   max-height: min(88dvh, 720px);
+  min-height: 270px;
   display: flex;
   flex-direction: column;
   animation: modal-in var(--dur) var(--ease);
@@ -1065,7 +1078,7 @@ body.is-modal-open { overflow: hidden; }
 @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } }
 @keyframes toast-out { to { opacity: 0; transform: translateY(8px); } }
 
-.loading-row { display: flex; align-items: center; gap: var(--space-2); color: var(--text2); padding: var(--space-3) 0; }
+.loading-row { display: flex; align-items: center; justify-content: center; color: var(--text2); padding: var(--space-4) 0; min-height: 64px; }
 
 .empty-state {
   color: var(--text2);
@@ -1113,6 +1126,7 @@ body.is-modal-open { overflow: hidden; }
   .page { padding-bottom: var(--space-6); }
   .app-shell { padding-bottom: var(--space-6); }
   .section + .section { margin-top: var(--space-4); }
+  .week-grid__day { padding: var(--space-1); }
 }
 
 @media (max-width: 560px) {
@@ -1137,6 +1151,14 @@ body.is-modal-open { overflow: hidden; }
      only genuinely wide rows break. */
   .app-header__actions .btn > span:not(.icon) { display: none; }
   .app-header__actions .btn { min-width: var(--tap-min); padding: 0 var(--space-2); }
+}
+
+@media (max-width: 480px) {
+  .week-grid__day { padding: 4px; }
+  .week-grid__day-head { font-size: 10px; }
+  .week-grid__slot { padding: 1px 3px; }
+  .week-grid__slot-time { font-size: 10px; }
+  .week-grid__slot-meta { font-size: 9px; }
 }
 
 @media (max-width: 400px) {

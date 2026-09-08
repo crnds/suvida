@@ -924,7 +924,9 @@ async function test25() {
   await resetRateLimits();
   const admin = S.teacherA;
 
-  for (const phone of ['abc', 'x', '---', '+', '12345678']) {
+  // '12345678' is 8 digits; the last three are the Thai-shape rule: too short,
+  // no leading 0, and one digit too many.
+  for (const phone of ['abc', 'x', '---', '+', '12345678', '0812345', '1812345678', '08123456789']) {
     const r = await publicBook(admin.slug, S.slot1, 'Junk Phone', phone);
     assert(`test25: booking with phone=${JSON.stringify(phone)} is rejected (400)`,
       r.status === 400, `${r.status} ${JSON.stringify(r.json)}`);
@@ -961,6 +963,12 @@ async function test25() {
   await resetRateLimits();
   const ok = await req('POST', '/api/public/history', { body: { slug: admin.slug, phone: '0810000001' } });
   assert('test25: a well-formed phone is still accepted (200)', ok.status === 200, JSON.stringify(ok.json));
+
+  // 9-digit landlines are legitimate Thai numbers and must not be collateral
+  // damage of the 10-digit mobile rule.
+  await resetRateLimits();
+  const landline = await req('POST', '/api/public/history', { body: { slug: admin.slug, phone: '021234567' } });
+  assert('test25: a 9-digit landline is accepted (200)', landline.status === 200, JSON.stringify(landline.json));
 }
 
 // ── Test 26: rate limiting is not bypassable via X-Forwarded-For ──
@@ -1127,6 +1135,80 @@ async function test30() {
   assert('test30: deleting a teacher revokes their sessions', sessionsGone.length === 0, String(sessionsGone.length));
 }
 
+// ── Test 31: template entry edit (PATCH) ───────────────────────
+// New endpoint added for the week-grid admin redesign: edits time/location
+// on an existing template entry via one atomic conditional UPDATE, mirroring
+// addTemplateEntry's INSERT...SELECT...NOT EXISTS guard.
+
+async function test31() {
+  await resetRateLimits();
+
+  const admin = await createAdmin(`smoke_edit_${RUN_ID}`, 'Smoke Edit', 'passwordE1');
+  const other = await createAdmin(`smoke_edit2_${RUN_ID}`, 'Smoke Edit Two', 'passwordE2');
+
+  const entryA = await req('POST', '/api/admin/template', {
+    cookie: admin.cookie,
+    body: { weekday: 2, start_minutes: 540, location_id: admin.defaultLocationId },
+  });
+  assert('test31: entry A created', entryA.status === 201, JSON.stringify(entryA.json));
+
+  const entryB = await req('POST', '/api/admin/template', {
+    cookie: admin.cookie,
+    body: { weekday: 2, start_minutes: 600, location_id: admin.defaultLocationId },
+  });
+  assert('test31: entry B created', entryB.status === 201, JSON.stringify(entryB.json));
+
+  const unauth = await req('PATCH', `/api/admin/template/${entryA.json.id}`,
+    { body: { weekday: 2, start_minutes: 570, location_id: admin.defaultLocationId } });
+  assert('test31: unauthenticated edit is 401', unauth.status === 401, JSON.stringify(unauth.json));
+
+  const ok = await req('PATCH', `/api/admin/template/${entryA.json.id}`, {
+    cookie: admin.cookie,
+    body: { weekday: 2, start_minutes: 570, location_id: admin.defaultLocationId },
+  });
+  assert('test31: edit succeeds (200) and echoes the new fields',
+    ok.status === 200 && ok.json.start_minutes === 570 && ok.json.location_id === admin.defaultLocationId,
+    JSON.stringify(ok.json));
+  const persisted = await row('SELECT weekday, start_minutes, location_id FROM templates WHERE id = ?', [entryA.json.id]);
+  assert('test31: the new time is actually persisted',
+    persisted && persisted.start_minutes === 570, JSON.stringify(persisted));
+
+  const notFound = await req('PATCH', '/api/admin/template/999999999', {
+    cookie: admin.cookie,
+    body: { weekday: 2, start_minutes: 660, location_id: admin.defaultLocationId },
+  });
+  assert('test31: editing a nonexistent id is 404', notFound.status === 404 && notFound.json.error === 'not_found',
+    JSON.stringify(notFound.json));
+
+  const crossTenant = await req('PATCH', `/api/admin/template/${entryA.json.id}`, {
+    cookie: other.cookie,
+    body: { weekday: 2, start_minutes: 660, location_id: other.defaultLocationId },
+  });
+  assert('test31: editing another teacher\'s entry is 404, not leaked as 200/403',
+    crossTenant.status === 404, JSON.stringify(crossTenant.json));
+
+  const foreignLoc = await req('PATCH', `/api/admin/template/${entryA.json.id}`, {
+    cookie: admin.cookie,
+    body: { weekday: 2, start_minutes: 570, location_id: other.defaultLocationId },
+  });
+  assert('test31: a foreign location_id is rejected (400)',
+    foreignLoc.status === 400 && foreignLoc.json.error === 'invalid_location', JSON.stringify(foreignLoc.json));
+
+  const dup = await req('PATCH', `/api/admin/template/${entryA.json.id}`, {
+    cookie: admin.cookie,
+    body: { weekday: 2, start_minutes: 600, location_id: admin.defaultLocationId },
+  });
+  assert('test31: colliding with another entry\'s (weekday, start_minutes) is 409',
+    dup.status === 409 && dup.json.error === 'entry_exists', JSON.stringify(dup.json));
+
+  const selfNoop = await req('PATCH', `/api/admin/template/${entryA.json.id}`, {
+    cookie: admin.cookie,
+    body: { weekday: 2, start_minutes: 570, location_id: admin.defaultLocationId },
+  });
+  assert('test31: re-saving an entry with its own unchanged (weekday, start_minutes) is not a false 409',
+    selfNoop.status === 200, JSON.stringify(selfNoop.json));
+}
+
 async function main() {
   const purged = await purgePreviousRuns();
   if (purged.admins > 0) console.log(`(purged ${purged.admins} leftover smoke_* teacher(s) from previous runs)`);
@@ -1159,6 +1241,7 @@ async function main() {
   await group('Test 28 — impossible dates rejected', test28);
   await group('Test 29 — notification watermark clamp', test29);
   await group('Test 30 — HTTP contract + tenant cascade', test30);
+  await group('Test 31 — template entry edit (PATCH)', test31);
 
   const skipped = results.filter((r) => r.skipped);
   const graded = results.filter((r) => !r.skipped);

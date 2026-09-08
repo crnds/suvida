@@ -183,7 +183,7 @@ function renderLocationFilterBar() {
   };
 
   els.locationFilter.appendChild(chip(I18N.t('booker_location_filter_all'), null));
-  STATE.locations.forEach((loc) => els.locationFilter.appendChild(chip(loc.title, loc.id)));
+  STATE.locations.forEach((loc) => els.locationFilter.appendChild(chip(I18N.localized(loc.title, loc.title_th), loc.id)));
 }
 
 function setLocationFilter(id) {
@@ -295,7 +295,7 @@ function renderDaySlots(body, dateStr, slots) {
     const time = UI.el('span', { class: 'slot-list__time tabular-nums' }, [
       UI.el('span', { text: `${fmtTime(slot.start_unix)} – ${fmtTime(slot.start_unix + 3600)}` }),
       slot.location_title
-        ? UI.el('span', { class: 'slot-list__meta', text: slot.location_title })
+        ? UI.el('span', { class: 'slot-list__meta', text: I18N.localized(slot.location_title, slot.location_title_th) })
         : null,
     ]);
     const btn = UI.el('button', {
@@ -311,10 +311,10 @@ function renderDaySlots(body, dateStr, slots) {
 
 // ── Booking form modal ─────────────────────────────────────
 
-// Thai mobile numbers are 9-10 digits; international entries carry a +.
-// isPlausiblePhone now lives in shared/validate.js, so the admin booking
-// form applies the same rule (it previously checked presence only) and the
-// bounds stay aligned with api/_lib/phone.js.
+// Thai numbers only: 10 digits for a mobile, 9 for a landline, always leading
+// '0'. isPlausiblePhone and formatThaiPhone both live in shared/validate.js,
+// so the admin booking form applies the same rule (it previously checked
+// presence only) and the shape stays aligned with api/_lib/phone.js.
 
 function openBookingForm(dateStr, slot) {
   STATE.reopenModal = () => openBookingForm(dateStr, slot);
@@ -338,9 +338,13 @@ function openBookingForm(dateStr, slot) {
     class: 'input',
     attrs: { id: 'bf-phone', type: 'tel', required: true, autocomplete: 'tel',
              inputmode: 'tel', maxlength: '20',
+             placeholder: I18N.t('booker_form_phone_placeholder'),
              'aria-describedby': 'bf-phone-error bf-phone-hint' },
   });
-  phoneInput.value = last.booker_phone || '';
+  // The cached number is the server-canonicalised digits-only form, so it has
+  // to go through the same mask the student's own typing does.
+  phoneInput.value = formatThaiPhone(last.booker_phone || '');
+  phoneInput.addEventListener('input', () => applyPhoneMask(phoneInput));
 
   const nameError = UI.el('div', { class: 'field-error hidden', attrs: { id: 'bf-name-error' } });
   const phoneError = UI.el('div', { class: 'field-error hidden', attrs: { id: 'bf-phone-error' } });
@@ -376,7 +380,7 @@ function openBookingForm(dateStr, slot) {
     slot.location_title
       ? UI.el('div', { class: 'text-caption' }, [
           UI.icon('location-dot'),
-          UI.el('span', { text: ` ${slot.location_title}` }),
+          UI.el('span', { text: ` ${I18N.localized(slot.location_title, slot.location_title_th)}` }),
         ])
       : null,
   ]);
@@ -424,6 +428,7 @@ function openBookingForm(dateStr, slot) {
           booker_phone: result.booker_phone,
           location_id: slot.location_id,
           location_title: slot.location_title,
+          location_title_th: slot.location_title_th,
         });
         showSuccessModal(dateStr, slot);
         loadMonth(true);
@@ -454,7 +459,7 @@ function showSuccessModal(dateStr, slot) {
       UI.el('i', { class: 'fa-solid fa-circle-check icon icon--display success-text', attrs: { 'aria-hidden': 'true' } }),
       UI.el('div', { class: 'empty-state__title', text: I18N.t('booker_book_success_body') }),
       UI.el('div', { class: 'text-body tabular-nums', text: `${fmtWeekdayDate(dateStr)} · ${fmtTime(slot.start_unix)}` }),
-      slot.location_title ? UI.el('div', { class: 'text-caption', text: slot.location_title }) : null,
+      slot.location_title ? UI.el('div', { class: 'text-caption', text: I18N.localized(slot.location_title, slot.location_title_th) }) : null,
     ]),
     closeBtn,
   ]);
@@ -571,7 +576,7 @@ function renderBookingRow(booking, phone, onCancelled) {
     UI.el('div', { class: 'tabular-nums', text: fmtDateTime(booking.start_unix) }),
     UI.el('div', { class: 'list-row__meta' }, [
       booking.location_title
-        ? UI.el('span', {}, [UI.icon('location-dot'), UI.el('span', { text: ` ${booking.location_title} · ` })])
+        ? UI.el('span', {}, [UI.icon('location-dot'), UI.el('span', { text: ` ${I18N.localized(booking.location_title, booking.location_title_th)} · ` })])
         : null,
       UI.el('span', { text: booking.booker_name || '' }),
     ]),
@@ -613,6 +618,8 @@ function renderBookingRow(booking, phone, onCancelled) {
 
 // ── History: phone lookup ───────────────────────────────────
 
+els.lookupPhone.addEventListener('input', () => applyPhoneMask(els.lookupPhone));
+
 els.lookupForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   els.lookupError.classList.add('hidden');
@@ -643,7 +650,7 @@ els.lookupForm.addEventListener('submit', async (e) => {
         return;
       }
       els.lookupResults.replaceChildren(...data.bookings.map((b) => renderBookingRow(
-        { id: b.id, start_unix: b.start_unix, booker_name: b.booker_name, location_title: b.location_title },
+        { id: b.id, start_unix: b.start_unix, booker_name: b.booker_name, location_title: b.location_title, location_title_th: b.location_title_th },
         phone,
         // Was a no-op, so cancelling a booking found by lookup left the
         // "booked on this device" list showing it as still active.

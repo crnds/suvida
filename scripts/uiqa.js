@@ -236,16 +236,39 @@ async function runFlows() {
     await page.waitForSelector('#bf-name');
     await page.waitForSelector('#bf-phone');
     await page.type('#bf-name', 'QA Student');
+
+    // The mask swallows letters entirely, so a too-short number is what
+    // actually exercises the "invalid" branch now.
     await page.type('#bf-phone', 'abc');
+    check('booker: the phone mask discards letters',
+      await page.$eval('#bf-phone', (n) => n.value === ''));
+    await page.type('#bf-phone', '08123');
     await page.click('#bf-submit');
     await wait(300);
-    check('booker: rejects a non-numeric phone',
+    check('booker: rejects an incomplete phone number',
       await page.$eval('#bf-phone', (n) => n.getAttribute('aria-invalid') === 'true').catch(() => false));
     check('booker: invalid field receives focus',
       await page.evaluate(() => document.activeElement.id === 'bf-phone'));
 
+    // Bangkok landlines are 9 digits and group 2-3-4, not 3-3-4.
+    await page.click('#bf-phone', { clickCount: 3 });
+    await page.type('#bf-phone', '021234567');
+    check('booker: the phone mask groups a landline as 02-123-4567',
+      await page.$eval('#bf-phone', (n) => n.value === '02-123-4567'),
+      await page.$eval('#bf-phone', (n) => n.value));
+
+    // A pasted +66 number is folded to local form by the same mask.
+    await page.click('#bf-phone', { clickCount: 3 });
+    await page.type('#bf-phone', '+66812345678');
+    check('booker: the phone mask folds +66 to local form',
+      await page.$eval('#bf-phone', (n) => n.value === '081-234-5678'),
+      await page.$eval('#bf-phone', (n) => n.value));
+
     await page.click('#bf-phone', { clickCount: 3 });
     await page.type('#bf-phone', '0891112233');
+    check('booker: the phone mask groups a mobile as 089-111-2233',
+      await page.$eval('#bf-phone', (n) => n.value === '089-111-2233'),
+      await page.$eval('#bf-phone', (n) => n.value));
     await page.click('#bf-submit');
     await page.waitForFunction(() => !!document.querySelector('.fa-circle-check'), { timeout: 8000 });
     check('booker: booking succeeds and shows a confirmation', true);
@@ -269,8 +292,9 @@ async function runFlows() {
       document.querySelector('#bf-name').value,
       document.querySelector('#bf-phone').value,
     ]);
+    // The cached value is canonical digits; the form re-applies the mask to it.
     check('booker: name and phone are prefilled from the last booking',
-      prefill[0] === 'QA Student' && prefill[1] === '0891112233', prefill.join('|'));
+      prefill[0] === 'QA Student' && prefill[1] === '089-111-2233', prefill.join('|'));
 
     // Modals stack, so Escape unwinds one level at a time.
     await page.keyboard.press('Escape');
@@ -1028,6 +1052,113 @@ async function runFlows() {
       landedDate === expected, `${from} -> ${landedDate} (expected ${expected})`);
 
     await page.close();
+  });
+
+  // 24. Week-grid redesign: fluid/non-scrolling grid, card click opens a
+  // modal, and edit/delete both happen there instead of an inline button.
+  await flow(24, async () => {
+    const uname = `qa_weekgrid_${Date.now()}`;
+    const password = 'weekgridpass1';
+    const ownerTok = await sessionCookie('/api/owner/login', { username: OWNER, password: OWNER_PASSWORD, remember: true });
+    const created = await fetch(BASE + '/api/owner/admins', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: `suvida_session=${ownerTok}` },
+      body: JSON.stringify({ username: uname, password, display_name: 'QA Week Grid' }),
+    });
+    check('admin: throwaway teacher created for week-grid flow', created.status === 201, JSON.stringify(await created.json().catch(() => ({}))));
+
+    const adminTok = await sessionCookie('/api/admin/login', { username: uname, password, remember: true });
+    const locRes = await fetch(BASE + '/api/admin/locations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: `suvida_session=${adminTok}` },
+      body: JSON.stringify({ title: 'Grid Room' }),
+    });
+    const loc = await locRes.json();
+    const tmplRes = await fetch(BASE + '/api/admin/template', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: `suvida_session=${adminTok}` },
+      body: JSON.stringify({ weekday: 2, start_minutes: 540, location_id: loc.id }),
+    });
+    const tmpl = await tmplRes.json();
+
+    const page = await newPage({ width: 390 });
+    await page.setCookie({ name: 'suvida_session', value: adminTok, domain: new URL(BASE).hostname, path: '/' });
+    await page.goto(`${BASE}/admin/`, { waitUntil: 'networkidle2' });
+    await page.click('#tab-btn-schedule');
+    await page.waitForSelector('.week-grid__slot');
+
+    const overflowAt = async () => page.evaluate(() => {
+      const g = document.querySelector('.week-grid');
+      return { scrollWidth: g.scrollWidth, clientWidth: g.clientWidth };
+    });
+    const mobile = await overflowAt();
+    check('admin: week-grid has no horizontal overflow at 390px',
+      mobile.scrollWidth <= mobile.clientWidth + 1, JSON.stringify(mobile));
+
+    await page.setViewport({ width: 1100, height: 900, deviceScaleFactor: 1 });
+    await wait(200);
+    const desktop = await overflowAt();
+    check('admin: week-grid has no horizontal overflow at 1100px',
+      desktop.scrollWidth <= desktop.clientWidth + 1, JSON.stringify(desktop));
+
+    check('admin: no delete button is rendered inline on the slot card',
+      await page.evaluate(() => !document.querySelector('.week-grid__slot .btn, .week-grid__slot button')));
+
+    await page.click('.week-grid__slot');
+    await page.waitForSelector('#tmpl-edit-time');
+    const prefill = await page.evaluate(() => [
+      document.querySelector('#tmpl-edit-time').value,
+      document.querySelector('#tmpl-edit-location').value,
+    ]);
+    check('admin: the modal prefills the entry\'s time and location',
+      prefill[0] === '09:00' && prefill[1] === String(loc.id), prefill.join('|'));
+
+    // A native <input type="time"> does not reliably accept page.type()'s
+    // keystrokes across headless Chrome versions — set the value directly
+    // and fire the events the form's submit handler actually listens for.
+    await page.evaluate(() => {
+      const el = document.querySelector('#tmpl-edit-time');
+      el.value = '10:30';
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await page.click('.modal-overlay:not(.hidden) .btn-primary[type="submit"]');
+    await page.waitForFunction(() => !document.querySelector('#tmpl-edit-time'), { timeout: 5000 });
+    await wait(300);
+    const cardTextAfterEdit = await page.$eval('.week-grid__slot', (n) => n.textContent);
+    check('admin: saving the modal updates the card\'s displayed time',
+      /10:30/.test(cardTextAfterEdit), cardTextAfterEdit.trim());
+    check('admin: success toast after editing a time slot',
+      await page.evaluate(() => [...document.querySelectorAll('.toast')]
+        .some((t) => /Time slot updated|อัปเดตช่วงเวลาแล้ว/.test(t.textContent))));
+
+    await page.click('.week-grid__slot');
+    await page.waitForSelector('.modal-overlay:not(.hidden) .btn-destructive');
+    await page.click('.modal-overlay:not(.hidden) .btn-destructive');
+    await page.waitForSelector('.modal-overlay:not(.hidden) .btn-destructive');
+    await page.click('.modal-overlay:not(.hidden) .btn-destructive');
+    await page.waitForFunction(() => !document.querySelector('.modal'), { timeout: 8000 });
+    await wait(400);
+    const tmplTextAfterDelete = await page.$eval('#template-list', (n) => n.textContent);
+    check('admin: deleting via the modal removes the entry (empty state reappears)',
+      /ยังไม่มีช่วงเวลา|No time slots/i.test(tmplTextAfterDelete), tmplTextAfterDelete.trim());
+    check('admin: no console errors on the week-grid flow', page.errors.length === 0, page.errors.join(' | '));
+    await page.close();
+
+    const listRes = await fetch(BASE + '/api/owner/admins', { headers: { Cookie: `suvida_session=${ownerTok}` } });
+    const listJson = await listRes.json().catch(() => ({}));
+    const stale = (listJson.admins || []).filter((a) => /^qa_weekgrid_/.test(a.username));
+    let removed = 0;
+    for (const a of stale) {
+      const del = await fetch(`${BASE}/api/owner/admins/${a.id}`, {
+        method: 'DELETE',
+        headers: { Cookie: `suvida_session=${ownerTok}` },
+      });
+      if (del.status === 200) removed++;
+    }
+    check('admin: throwaway week-grid teacher(s) cleaned up',
+      removed === stale.length && stale.length >= 1,
+      `removed ${removed}/${stale.length}`);
   });
 
 }

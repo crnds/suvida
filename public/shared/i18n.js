@@ -87,7 +87,8 @@ const DICT = {
     booker_form_submit: 'ยืนยันการจอง',
     booker_form_name_required: 'กรุณากรอกชื่อ',
     booker_form_phone_required: 'กรุณากรอกเบอร์โทรศัพท์',
-    booker_form_phone_invalid: 'เบอร์โทรศัพท์ไม่ถูกต้อง กรุณากรอกตัวเลข 9-15 หลัก',
+    booker_form_phone_invalid: 'กรุณากรอกเบอร์โทรศัพท์ไทย เช่น 081-234-5678',
+    booker_form_phone_placeholder: '081-234-5678',
     booker_form_phone_hint: 'ใช้เบอร์นี้สำหรับค้นหาและยกเลิกการจองภายหลัง',
     booker_form_check_fields: 'กรุณาตรวจสอบข้อมูลที่กรอก',
     booker_form_back: 'เลือกเวลาอื่น',
@@ -100,7 +101,7 @@ const DICT = {
     booker_history_none_local: 'ยังไม่มีการจองจากเครื่องนี้',
     booker_history_lookup_title: 'ค้นหาด้วยเบอร์โทรศัพท์',
     booker_history_lookup_hint: 'จองจากเครื่องอื่นใช่ไหม? กรอกเบอร์ที่ใช้จองเพื่อดูและยกเลิกการจอง',
-    booker_history_lookup_phone: 'เช่น 0812345678',
+    booker_history_lookup_phone: 'เช่น 081-234-5678',
     booker_history_lookup_phone_label: 'เบอร์โทรศัพท์',
     booker_history_lookup_btn: 'ค้นหา',
     booker_history_lookup_none: 'ไม่พบการจองที่ใช้งานอยู่สำหรับเบอร์นี้',
@@ -134,6 +135,9 @@ const DICT = {
     schedule_template_entry_exists: 'มีช่วงเวลานี้อยู่แล้ว',
     schedule_template_added: 'เพิ่มช่วงเวลาแล้ว',
     schedule_template_removed: 'ลบช่วงเวลาแล้ว',
+    schedule_template_edit_title: 'แก้ไขช่วงเวลา',
+    schedule_template_updated: 'อัปเดตช่วงเวลาแล้ว',
+    schedule_template_delete_confirm: 'ลบช่วงเวลานี้ออกจากตารางประจำสัปดาห์ใช่หรือไม่?',
     schedule_bulk_done: 'เปิดจองล่วงหน้า {n} สัปดาห์แล้ว',
     schedule_template_no_locations_hint: 'เพิ่มสถานที่ในหน้าตั้งค่าก่อนสร้างตารางเวลา',
     schedule_weeks_title: 'เปิด/ปิดสัปดาห์',
@@ -200,12 +204,16 @@ const DICT = {
     settings_locations_title: 'สถานที่',
     settings_locations_hint: 'จัดการรายชื่อสถานที่สอนของคุณ',
     settings_locations_add_label: 'ชื่อสถานที่',
+    settings_locations_add_label_th: 'ชื่อสถานที่ (ภาษาไทย)',
+    settings_locations_add_label_th_hint: 'ไม่บังคับ — แสดงแทนชื่อด้านบนเมื่อตั้งค่าภาษาเป็นไทย',
     settings_locations_add_btn: 'เพิ่มสถานที่',
     settings_locations_empty: 'ยังไม่มีสถานที่',
     settings_locations_in_use: 'ไม่สามารถลบได้ เนื่องจากมีตารางเวลาที่ใช้สถานที่นี้อยู่',
     settings_locations_added: 'เพิ่มสถานที่แล้ว',
+    settings_locations_updated: 'บันทึกสถานที่แล้ว',
     settings_locations_removed: 'ลบสถานที่แล้ว',
     settings_locations_delete_confirm: 'ลบสถานที่ "{name}" ใช่หรือไม่?',
+    settings_locations_edit_title: 'แก้ไขสถานที่',
     settings_share_copy_manual: 'คัดลอกอัตโนมัติไม่ได้ กรุณากด Ctrl/Cmd+C',
     settings_slug_saved: 'บันทึกลิงก์ใหม่แล้ว',
     settings_slug_title: 'ลิงก์หน้าจอง',
@@ -340,7 +348,8 @@ const DICT = {
     booker_form_submit: 'Confirm booking',
     booker_form_name_required: 'Please enter a name',
     booker_form_phone_required: 'Please enter a phone number',
-    booker_form_phone_invalid: "That doesn't look like a phone number — please enter 9-15 digits",
+    booker_form_phone_invalid: 'Enter a Thai phone number, e.g. 081-234-5678',
+    booker_form_phone_placeholder: '081-234-5678',
     booker_form_phone_hint: "You'll use this number to find or cancel the booking later",
     booker_form_check_fields: 'Please check the highlighted fields',
     booker_form_back: 'Pick a different time',
@@ -353,7 +362,7 @@ const DICT = {
     booker_history_none_local: 'No bookings from this device yet',
     booker_history_lookup_title: 'Look up by phone number',
     booker_history_lookup_hint: 'Booked on another device? Enter the number you booked with to view or cancel it.',
-    booker_history_lookup_phone: 'e.g. 0812345678',
+    booker_history_lookup_phone: 'e.g. 081-234-5678',
     booker_history_lookup_phone_label: 'Phone number',
     booker_history_lookup_btn: 'Search',
     booker_history_lookup_none: 'No active bookings found for that number',
@@ -385,6 +394,9 @@ const DICT = {
     schedule_template_entry_exists: 'That time slot already exists',
     schedule_template_added: 'Time slot added',
     schedule_template_removed: 'Time slot removed',
+    schedule_template_edit_title: 'Edit time slot',
+    schedule_template_updated: 'Time slot updated',
+    schedule_template_delete_confirm: 'Remove this time slot from the weekly template?',
     schedule_bulk_done: 'Opened booking for the next {n} week(s)',
     schedule_template_no_locations_hint: 'Add a location in Settings before creating a schedule entry.',
     schedule_weeks_title: 'Activate / deactivate weeks',
@@ -447,12 +459,16 @@ const DICT = {
     settings_locations_title: 'Locations',
     settings_locations_hint: 'Manage the studio locations you teach at.',
     settings_locations_add_label: 'Location name',
+    settings_locations_add_label_th: 'Location name (Thai)',
+    settings_locations_add_label_th_hint: "Optional — shown instead of the name above when the language is set to Thai.",
     settings_locations_add_btn: 'Add location',
     settings_locations_empty: 'No locations yet.',
     settings_locations_in_use: "Can't delete — this location is still in use by a template or slot.",
     settings_locations_added: 'Location added',
+    settings_locations_updated: 'Location saved',
     settings_locations_removed: 'Location removed',
     settings_locations_delete_confirm: 'Delete the location "{name}"?',
+    settings_locations_edit_title: 'Edit location',
     settings_share_copy_manual: "Couldn't copy automatically — press Ctrl/Cmd+C",
     settings_slug_saved: 'New link saved',
     settings_slug_title: 'Booking page link',
@@ -553,6 +569,15 @@ const I18N = {
       }
     }
     return str;
+  },
+
+  // Picks between a language-neutral field (e.g. a location's `title`) and
+  // its optional Thai counterpart (`title_th`), the same way `t()` picks a
+  // dictionary string — but for user-entered data, which has no English
+  // fallback to fall back to, so an empty/absent Thai value keeps `primary`
+  // even while I18N.lang is 'th'.
+  localized(primary, thVariant) {
+    return (I18N.lang === 'th' && thVariant) ? thVariant : (primary || '');
   },
 
   setLang(lang) {
