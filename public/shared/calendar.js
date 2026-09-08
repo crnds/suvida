@@ -75,9 +75,14 @@ function createMonthCalendar(container, handlers) {
     return nav;
   }
 
-  // Draws the nav plus an arbitrary node in place of the grid.
-  function renderMessage(monthStr, node) {
+  // Draws the nav plus an arbitrary node in place of the grid. A failed or
+  // still-loading month must not silently steal a pending keyboard-driven
+  // focus target meant for a *different* render — keepPendingFocus is the
+  // one exception, for the transient loading spinner that always precedes
+  // the real render() for the same navigation.
+  function renderMessage(monthStr, node, { keepPendingFocus = false } = {}) {
     currentMonth = monthStr;
+    if (!keepPendingFocus) pendingFocusDate = null;
     container.replaceChildren(buildNav(monthStr), node);
   }
 
@@ -85,8 +90,12 @@ function createMonthCalendar(container, handlers) {
     currentMonth = monthStr;
 
     // A re-render (language toggle, refresh after booking) rebuilds every
-    // button, which would otherwise drop keyboard focus to <body>.
+    // button, which would otherwise drop keyboard focus to <body>. A month
+    // crossed via keyboard (PageUp/PageDown, or an arrow off the 1st/last)
+    // has no old focused cell in this DOM at all — pendingFocusDate is the
+    // fallback for that case.
     const focusedDate = document.activeElement?.closest?.('.calendar-day')?.dataset.date;
+    const wantFocusDate = focusedDate || pendingFocusDate;
 
     const [y, m] = monthStr.split('-').map(Number);
     const today = bangkokTodayString();
@@ -174,7 +183,7 @@ function createMonthCalendar(container, handlers) {
         handlers.onDayClick(dateStr);
       });
 
-      if (dateStr === focusedDate) toFocus = btn;
+      if (dateStr === wantFocusDate) toFocus = btn;
       cells.set(dateStr, btn);
       addCell(btn);
     }
@@ -186,7 +195,8 @@ function createMonthCalendar(container, handlers) {
     // Roving tabindex: exactly one cell is a tab stop. Priority: the
     // selected day, then today (if in this month), then the 1st.
     const firstDayStr = `${y}-${String(m).padStart(2, '0')}-01`;
-    const rovingDate = (selectedDate && cells.has(selectedDate)) ? selectedDate
+    const rovingDate = (wantFocusDate && cells.has(wantFocusDate)) ? wantFocusDate
+      : (selectedDate && cells.has(selectedDate)) ? selectedDate
       : cells.has(today) ? today
       : firstDayStr;
     cells.forEach((btn, dateStr) => {
@@ -234,6 +244,7 @@ function createMonthCalendar(container, handlers) {
 
     container.replaceChildren(buildNav(monthStr), grid);
     toFocus?.focus({ preventScroll: true });
+    pendingFocusDate = null;
   }
 
   // Highlights the day whose panel is open, so the calendar behind the sheet

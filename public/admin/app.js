@@ -565,7 +565,7 @@ async function loadCalendarMonth(quiet) {
   const token = ++STATE.monthToken;
   if (!quiet) {
     els.adminCalendar.setAttribute('aria-busy', 'true');
-    adminCal.renderMessage(STATE.month, UI.loadingRow());
+    adminCal.renderMessage(STATE.month, UI.loadingRow(), { keepPendingFocus: true });
   }
   try {
     const data = await Api.adminSlotsMonth(STATE.month, STATE.calendarLocationFilter);

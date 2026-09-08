@@ -161,7 +161,7 @@ async function loadMonth(quiet) {
   const token = ++STATE.monthToken;
   if (!quiet) {
     els.calendar.setAttribute('aria-busy', 'true');
-    cal.renderMessage(STATE.month, UI.loadingRow());
+    cal.renderMessage(STATE.month, UI.loadingRow(), { keepPendingFocus: true });
   }
   try {
     const data = await Api.publicPageMonth(STATE.slug, STATE.month, STATE.locationFilter);

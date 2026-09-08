@@ -847,6 +847,71 @@ async function runFlows() {
     await page.close();
   });
 
+  // 19. PageDown crosses a month boundary and focus lands on a real day
+  // cell in the new month, not on <body>.
+  await flow(19, async () => {
+    const page = await newPage();
+    await page.goto(`${BASE}/b/${SLUG}`, { waitUntil: 'networkidle2' });
+    await page.waitForSelector(OPEN_DAY);
+
+    const startLabel = await page.$eval('.calendar-nav__label', (n) => n.textContent);
+    await page.$eval('.calendar-day[tabindex="0"]', (el) => el.focus());
+
+    await page.keyboard.press('PageDown');
+    await page.waitForFunction(
+      (prev) => document.querySelector('.calendar-nav__label')?.textContent !== prev,
+      { timeout: 8000 }, startLabel,
+    );
+    await page.waitForFunction(
+      () => !!document.activeElement?.closest?.('.calendar-day'),
+      { timeout: 8000 },
+    );
+    const landedDate = await page.evaluate(() => document.activeElement.closest('.calendar-day').dataset.date);
+    check('booker: PageDown lands focus on a day cell in the next month',
+      !!landedDate && landedDate.slice(0, 7) !== startLabel, landedDate);
+
+    await page.close();
+  });
+
+  // 20. Unavailable days are reachable but inert: focusable, announced as
+  // aria-disabled, and Enter opens no modal.
+  await flow(20, async () => {
+    const page = await newPage();
+    await page.goto(`${BASE}/b/${SLUG}`, { waitUntil: 'networkidle2' });
+    await page.waitForSelector(OPEN_DAY);
+
+    const past = await page.$('.calendar-day--past');
+    check('booker: a past day cell exists to test against', !!past);
+    if (past) {
+      await page.evaluate((el) => el.focus(), past);
+      check('booker: a past day can receive focus',
+        await page.evaluate(() => document.activeElement.classList.contains('calendar-day--past')));
+      check('booker: a past day reports aria-disabled',
+        await page.evaluate(() => document.activeElement.getAttribute('aria-disabled') === 'true'));
+      await page.keyboard.press('Enter');
+      await wait(300);
+      check('booker: Enter on a past day opens no modal', (await page.$$('.modal')).length === 0);
+    }
+    await page.close();
+  });
+
+  // 21. Focus on a day cell survives a language toggle (same guarantee as
+  // the existing same-month re-render case, now via the roving-tabindex path).
+  await flow(21, async () => {
+    const page = await newPage();
+    await page.goto(`${BASE}/b/${SLUG}`, { waitUntil: 'networkidle2' });
+    await page.waitForSelector(OPEN_DAY);
+
+    await page.$eval('.calendar-day[tabindex="0"]', (el) => el.focus());
+    const before = await page.evaluate(() => document.activeElement.dataset.date);
+    await page.click('#lang-toggle');
+    await wait(300);
+    const after = await page.evaluate(() => document.activeElement?.dataset?.date);
+    check('booker: focus survives a language toggle', after === before, `${before} -> ${after}`);
+
+    await page.close();
+  });
+
 }
 
 // ── a11y: contrast, names, labels, heading order ────────────
