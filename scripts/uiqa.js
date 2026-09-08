@@ -1104,8 +1104,32 @@ async function runFlows() {
     check('admin: no delete button is rendered inline on the slot card',
       await page.evaluate(() => !document.querySelector('.week-grid__slot .btn, .week-grid__slot button')));
 
+    // The location line is clipped to one line, so it must never wrap the
+    // card into a multi-line block the way the 7-column phone layout did.
+    await page.setViewport({ width: 390, height: 844, deviceScaleFactor: 1 });
+    await wait(200);
+    const cardBox = await page.$eval('.week-grid__slot', (n) => {
+      const r = n.getBoundingClientRect();
+      const meta = n.querySelector('.week-grid__slot-meta');
+      return { w: r.width, h: r.height, metaH: meta ? meta.getBoundingClientRect().height : 0 };
+    });
+    check('admin: a slot card is wider than it is tall at 390px',
+      cardBox.w > cardBox.h, JSON.stringify(cardBox));
+    check('admin: the location line stays on one line at 390px',
+      cardBox.metaH > 0 && cardBox.metaH < 24, JSON.stringify(cardBox));
+
     await page.click('.week-grid__slot');
     await page.waitForSelector('#tmpl-edit-time');
+    // The weekday is not editable, so the header has to name it.
+    const subtitle = await page.$eval('.modal-overlay:not(.hidden) .modal__subtitle', (n) => n.textContent);
+    check('admin: the edit modal names the weekday and time being edited',
+      /09:00/.test(subtitle) && subtitle.trim().length > 6, subtitle);
+    check('admin: the modal subtitle is part of the dialog\'s accessible name',
+      await page.evaluate(() => {
+        const d = document.querySelector('.modal-overlay:not(.hidden) .modal');
+        const ids = (d.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean);
+        return ids.length === 2 && ids.every((id) => document.getElementById(id));
+      }));
     const prefill = await page.evaluate(() => [
       document.querySelector('#tmpl-edit-time').value,
       document.querySelector('#tmpl-edit-location').value,
@@ -1133,8 +1157,30 @@ async function runFlows() {
         .some((t) => /Time slot updated|อัปเดตช่วงเวลาแล้ว/.test(t.textContent))));
 
     await page.click('.week-grid__slot');
-    await page.waitForSelector('.modal-overlay:not(.hidden) .btn-destructive');
-    await page.click('.modal-overlay:not(.hidden) .btn-destructive');
+    // Delete in the modal footer is the *quiet* destructive variant; the
+    // solid one belongs to the confirm dialog it opens. If those two ever
+    // collapse back to the same weight, the second selector here matches the
+    // wrong button and this flow fails — which is the point.
+    await page.waitForSelector('.modal-overlay:not(.hidden) .btn-destructive-quiet');
+    // The success toast from the edit above is still on screen, bottom-centre,
+    // at a z-index above the modal layer — directly over a bottom sheet's
+    // action row on a phone. It must not swallow the click.
+    check('admin: a visible toast does not intercept clicks on the modal beneath it',
+      await page.evaluate(() => {
+        if (!document.querySelector('.toast')) return true;
+        const btn = document.querySelector('.modal-overlay:not(.hidden) .btn-destructive-quiet');
+        const r = btn.getBoundingClientRect();
+        const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+        return !!hit && btn.contains(hit);
+      }));
+    check('admin: the modal\'s delete is not a second full-width primary slab',
+      await page.evaluate(() => {
+        const btn = document.querySelector('.modal-overlay:not(.hidden) .btn-destructive-quiet');
+        const body = btn.closest('.modal__body');
+        return !btn.classList.contains('btn-block')
+          && btn.getBoundingClientRect().width < body.getBoundingClientRect().width * 0.6;
+      }));
+    await page.click('.modal-overlay:not(.hidden) .btn-destructive-quiet');
     await page.waitForSelector('.modal-overlay:not(.hidden) .btn-destructive');
     await page.click('.modal-overlay:not(.hidden) .btn-destructive');
     await page.waitForFunction(() => !document.querySelector('.modal'), { timeout: 8000 });

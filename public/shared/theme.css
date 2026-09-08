@@ -461,6 +461,18 @@ h1, h2, h3, h4, .text-hero, .text-h1, .text-h2, .text-h3 {
 .btn-destructive { background: var(--color-error); color: #fff; border-color: var(--color-error); }
 .btn-destructive:hover:not(:disabled) { background: var(--surface); color: var(--color-error); }
 
+/* Destructive but *secondary* — the delete tucked in a modal footer, where
+   the primary action is Save. `destructive` fills solid because there it is
+   the primary action (the confirm dialog's confirm button); reusing that
+   weight for an escape hatch makes the loudest thing on the panel the one
+   action the user least wants. The fill is held back for hover. */
+.btn-destructive-quiet { background: transparent; color: var(--color-error); border-color: var(--border); }
+.btn-destructive-quiet:hover:not(:disabled) {
+  background: var(--color-error);
+  color: #fff;
+  border-color: var(--color-error);
+}
+
 /* Icon-only. The ::after expands the hit area to --tap-min without letting
    a 36px button push a dense row taller. */
 .btn-icon {
@@ -750,6 +762,16 @@ input[type="checkbox"], input[type="radio"] {
 .list-row--stacked > .list-row__main { flex: 0 0 auto; width: 100%; }
 
 /* ── Week grid (schedule template: one column per weekday) ─ */
+/* Two shapes, one DOM. Wide viewports get the seven-column table a weekly
+   schedule wants; at or below 768px a column is under ~80px of content
+   width — narrower than a single Thai word — so the grid turns into one row
+   per weekday instead of shrinking its own type into illegibility. The old
+   9–10px overrides that used to live in the 480px block are gone with it.
+
+   Structure is carried by two line weights and nothing else: one continuous
+   hairline under the day names, one vertical hairline between columns. No
+   boxes — seven bordered columns each holding bordered cards stacked four
+   hairlines deep, which is what made this read as noise. */
 
 .week-grid {
   display: grid;
@@ -761,49 +783,99 @@ input[type="checkbox"], input[type="radio"] {
 .week-grid__day {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
+  gap: var(--space-2);
   min-width: 0;
-  border: var(--border-w) solid var(--border);
-  border-radius: var(--radius-card);
-  padding: var(--space-2);
+  padding: 0 var(--space-icon);
+  border-left: var(--border-w) solid var(--border-subtle);
 }
+.week-grid__day:first-child { border-left: none; padding-left: 0; }
+.week-grid__day:last-child { padding-right: 0; }
 
 .week-grid__day-head {
   text-align: center;
-  font-size: 11px;
+  /* 12px is this system's caption floor. Uppercase and 0.06em tracking are
+     both gone: Thai is caseless, and the tracking was pulling the tone marks
+     off อา/พฤ at the old 10–11px. */
+  font-size: 12px;
   font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  line-height: 1.5;
   color: var(--text2);
-  padding-bottom: var(--space-1);
-  border-bottom: var(--border-w) solid var(--border-subtle);
+  padding-bottom: var(--space-icon);
+  border-bottom: var(--border-w) solid var(--border);
 }
 
-/* A real <button> card, not a row — each stacks inside its day column and is
-   the sole click target that opens the edit/delete modal (no inline
-   delete button here any more). */
+/* Slots live in their own box so they can stack on desktop and wrap on
+   mobile, and so a short day column stops stretching its cards to match the
+   tallest one. */
+.week-grid__slots {
+  display: flex;
+  flex-direction: column;
+  align-content: start;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+/* A real <button> card — the sole click target that opens the edit/delete
+   modal (no inline delete button here any more). */
 .week-grid__slot {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 2px;
+  gap: 1px;
   width: 100%;
   min-width: 0;
-  padding: 2px 4px;
-  border: var(--border-w) solid var(--border);
+  padding: var(--space-1) var(--space-icon);
+  border: var(--border-w) solid var(--border-subtle);
   border-radius: var(--radius);
   background: var(--surface-card);
   color: var(--text);
   font: inherit;
   text-align: left;
   cursor: pointer;
-  transition: background-color var(--dur) var(--ease), border-color var(--dur) var(--ease);
+  transition:
+    background-color var(--dur) var(--ease),
+    border-color var(--dur) var(--ease),
+    box-shadow var(--dur) var(--ease);
 }
-.week-grid__slot:hover { background: var(--surface-alt); border-color: var(--primary); }
+/* The brass edge is the affordance. An inset rule, not elevation — same
+   device .input:focus uses, so it stays inside DESIGN.md's flat rule. */
+.week-grid__slot:hover {
+  background: var(--surface-alt);
+  border-color: var(--border);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
 .week-grid__slot:active { background: var(--surface-alt); }
 
-.week-grid__slot-time { font-size: 11px; }
-.week-grid__slot-meta { display: block; font-size: 10px; color: var(--text2); }
+/* The time is the datum, the location qualifies it. Before this the two sat
+   at 11px and 10px, so neither read as primary. */
+.week-grid__slot-time {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+/* One line, always. A full location title ("ห้องซ้อม A (Grand Piano)") used
+   to wrap to five stacked lines inside a 42px column. */
+.week-grid__slot-meta {
+  display: block;
+  max-width: 100%;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A weekday with no lessons. aria-hidden because the day head already names
+   the day and the absence of slots is self-evident to a screen reader — but
+   --text2, not --muted: it is visible text, and --muted reads at 2.19:1
+   (uiqa's contrast audit fails it). */
+.week-grid__empty {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text2);
+  text-align: center;
+}
 
 /* ── Banners ────────────────────────────────────────────── */
 
@@ -998,8 +1070,31 @@ body.is-modal-open { overflow: hidden; }
   padding: var(--space-3) var(--space-3) var(--space-2);
   flex: none;
 }
+.modal__heading { min-width: 0; }
 .modal__title { font-size: 18px; line-height: 1.4; min-width: 0; }
+/* Names the record being edited. A form whose subject is fixed (the weekday
+   here) has to state it, or the fields have no context. */
+.modal__subtitle {
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.5;
+  color: var(--text2);
+  margin-top: 2px;
+}
 .modal__body { padding: 0 var(--space-3) var(--space-3); overflow-y: auto; flex: 1; -webkit-overflow-scrolling: touch; }
+
+/* A destructive action, held away from the primary one. Two equal-weight
+   full-width slabs stacked 12px apart — the lower one deleting data — is a
+   mis-tap waiting to happen, so delete drops below a rule and shrinks. */
+.modal__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: var(--border-w) solid var(--border-subtle);
+}
 
 .modal__close {
   background: none;
@@ -1054,7 +1149,11 @@ body.is-modal-open { overflow: hidden; }
   background: var(--primary);
   color: var(--text-on-dark);
   border-radius: var(--radius);
-  pointer-events: auto;
+  /* Deliberately NOT `pointer-events: auto`. A toast carries no control, and
+     the region is bottom-centre at z-index 200 — above the modal layer — so
+     re-enabling hits meant that for the 3.2s after any success message the
+     toast swallowed clicks aimed at the bottom of the bottom-sheet modal
+     underneath it, the sheet's own action row included. */
   animation: toast-in var(--dur) var(--ease);
 }
 .toast--success { background: var(--color-success); border-color: var(--color-success); }
@@ -1126,7 +1225,42 @@ body.is-modal-open { overflow: hidden; }
   .page { padding-bottom: var(--space-6); }
   .app-shell { padding-bottom: var(--space-6); }
   .section + .section { margin-top: var(--space-4); }
-  .week-grid__day { padding: var(--space-1); }
+
+  /* One row per weekday: the day name in a fixed rail, its slots flowing
+     beside it and wrapping. A chip gets ~100px here instead of the 42px a
+     seventh of a phone screen allows, which is what lets the time and the
+     location each sit on one legible line. */
+  .week-grid { display: flex; flex-direction: column; }
+
+  .week-grid__day {
+    display: grid;
+    /* 5ch clears the widest Thai abbreviation (พฤ) and the English ones. */
+    grid-template-columns: 5ch minmax(0, 1fr);
+    align-items: start;
+    gap: var(--space-2);
+    padding: var(--space-icon) 0;
+    border-left: none;
+    border-bottom: var(--border-w) solid var(--border-subtle);
+  }
+  .week-grid__day:first-child { padding-left: 0; }
+  .week-grid__day:last-child { border-bottom: none; }
+
+  .week-grid__day-head {
+    text-align: left;
+    padding-bottom: 0;
+    border-bottom: none;
+    /* Optically centres the single-line day name against the first chip. */
+    padding-top: var(--space-1);
+  }
+
+  /* A grid, not wrapped flex: content-sized chips left a zigzag right edge
+     and no two rows started at the same x. Equal tracks give a flush block. */
+  .week-grid__slots {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  }
+
+  .week-grid__empty { text-align: left; padding-top: var(--space-1); }
 }
 
 @media (max-width: 560px) {
@@ -1151,14 +1285,6 @@ body.is-modal-open { overflow: hidden; }
      only genuinely wide rows break. */
   .app-header__actions .btn > span:not(.icon) { display: none; }
   .app-header__actions .btn { min-width: var(--tap-min); padding: 0 var(--space-2); }
-}
-
-@media (max-width: 480px) {
-  .week-grid__day { padding: 4px; }
-  .week-grid__day-head { font-size: 10px; }
-  .week-grid__slot { padding: 1px 3px; }
-  .week-grid__slot-time { font-size: 10px; }
-  .week-grid__slot-meta { font-size: 9px; }
 }
 
 @media (max-width: 400px) {

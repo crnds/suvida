@@ -344,6 +344,13 @@ const UI = (() => {
 
     const titleId = `modal-title-${++titleSeq}`;
     const title = el('h2', { class: 'text-h3 modal__title', text: o.title, attrs: { id: titleId } });
+    // An optional second line naming the record being edited. It is part of
+    // the accessible name, not decoration, so it joins aria-labelledby.
+    const subtitleId = o.subtitle ? `${titleId}-sub` : null;
+    const heading = el('div', { class: 'modal__heading' }, [
+      title,
+      o.subtitle ? el('div', { class: 'modal__subtitle', text: o.subtitle, attrs: { id: subtitleId } }) : null,
+    ]);
 
     const closeBtn = el('button', {
       class: 'modal__close',
@@ -351,7 +358,7 @@ const UI = (() => {
     }, [icon('xmark', 'icon--lg')]);
     closeBtn.addEventListener('click', () => closeModal());
 
-    const head = el('div', { class: 'modal__header' }, [title, closeBtn]);
+    const head = el('div', { class: 'modal__header' }, [heading, closeBtn]);
     const body = el('div', { class: 'modal__body' }, [
       // A modal opened on top of another gets an explicit way back, instead
       // of the dead end the booking form used to be.
@@ -377,7 +384,11 @@ const UI = (() => {
 
     const dialog = el('div', {
       class: 'modal',
-      attrs: { role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': titleId },
+      attrs: {
+        role: 'dialog',
+        'aria-modal': 'true',
+        'aria-labelledby': subtitleId ? `${titleId} ${subtitleId}` : titleId,
+      },
     }, [head, body]);
 
     const overlay = el('div', { class: 'modal-overlay' }, [dialog]);

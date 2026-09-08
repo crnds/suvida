@@ -265,15 +265,27 @@ function renderTemplate() {
 
   const grid = UI.el('div', { class: 'week-grid' }, byWeekday.map((entries, weekday) => UI.el('div', { class: 'week-grid__day' }, [
     UI.el('div', { class: 'week-grid__day-head', text: I18N.weekdayShort(weekday) }),
-    ...entries.map((entry) => {
-      const loc = STATE.locations.find((l) => l.id === entry.location_id);
-      const card = UI.el('button', { class: 'week-grid__slot', attrs: { type: 'button' } }, [
-        UI.el('div', { class: 'week-grid__slot-time tabular-nums', text: minutesToTimeInput(entry.start_minutes) }),
-        loc ? UI.el('span', { class: 'week-grid__slot-meta', text: I18N.localized(loc.title, loc.title_th) }) : null,
-      ]);
-      card.addEventListener('click', () => openEditTemplateModal(entry));
-      return card;
-    }),
+    // The slots get their own box so they can stack in a column on desktop
+    // and wrap into a row beside the day name on a phone (theme.css).
+    UI.el('div', { class: 'week-grid__slots' }, entries.length === 0
+      // Decorative only: the day head already names the weekday, so there is
+      // nothing here worth announcing.
+      ? [UI.el('div', { class: 'week-grid__empty', text: '—', attrs: { 'aria-hidden': 'true' } })]
+      : entries.map((entry) => {
+        const loc = STATE.locations.find((l) => l.id === entry.location_id);
+        const locTitle = loc ? I18N.localized(loc.title, loc.title_th) : null;
+        const card = UI.el('button', {
+          class: 'week-grid__slot',
+          // The meta line is clipped to one line, so the full location has to
+          // reach a screen reader (and a tooltip) some other way.
+          attrs: { type: 'button', title: locTitle },
+        }, [
+          UI.el('div', { class: 'week-grid__slot-time tabular-nums', text: minutesToTimeInput(entry.start_minutes) }),
+          locTitle ? UI.el('span', { class: 'week-grid__slot-meta', text: locTitle }) : null,
+        ]);
+        card.addEventListener('click', () => openEditTemplateModal(entry));
+        return card;
+      })),
   ])));
   els.templateList.replaceChildren(grid);
 }
@@ -298,24 +310,39 @@ function openEditTemplateModal(entry) {
     attrs: { type: 'submit' },
   }, [UI.icon('check'), UI.el('span', { text: I18N.t('common_save') })]);
 
-  const form = UI.el('form', { class: 'stack-tight', attrs: { novalidate: true } }, [
-    UI.el('div', { class: 'field' }, [
-      UI.el('label', { text: I18N.t('schedule_template_add_time'), attrs: { for: 'tmpl-edit-time' } }),
-      timeInput,
-    ]),
-    UI.el('div', { class: 'field' }, [
-      UI.el('label', { text: I18N.t('schedule_template_add_location'), attrs: { for: 'tmpl-edit-location' } }),
-      locationSelect,
+  // `.stack` between the field group and the submit, `.stack-tight` within
+  // it: 12px between two related fields, 24px before the action.
+  const form = UI.el('form', { class: 'stack', attrs: { novalidate: true } }, [
+    UI.el('div', { class: 'stack-tight' }, [
+      UI.el('div', { class: 'field' }, [
+        UI.el('label', { text: I18N.t('schedule_template_add_time'), attrs: { for: 'tmpl-edit-time' } }),
+        timeInput,
+      ]),
+      UI.el('div', { class: 'field' }, [
+        UI.el('label', { text: I18N.t('schedule_template_add_location'), attrs: { for: 'tmpl-edit-location' } }),
+        locationSelect,
+      ]),
     ]),
     submit,
   ]);
 
+  // Small, quiet and below a rule, not a second full-width red slab under
+  // Save. The confirm dialog it opens is where the solid red belongs.
   const deleteBtn = UI.button({
-    kind: 'destructive', block: true, icon: 'trash', label: I18N.t('common_delete'),
+    kind: 'destructive-quiet', size: 'sm', icon: 'trash', label: I18N.t('common_delete'),
   });
 
-  const handle = showModal(I18N.t('schedule_template_edit_title'),
-    UI.el('div', { class: 'stack-tight' }, [errorBox, form, deleteBtn]));
+  // The weekday is fixed for this entry, so the header has to say which day
+  // and which time is being edited — the form itself can't.
+  const handle = showModal(
+    I18N.t('schedule_template_edit_title'),
+    UI.el('div', { class: 'stack-tight' }, [
+      errorBox,
+      form,
+      UI.el('div', { class: 'modal__footer' }, [deleteBtn]),
+    ]),
+    { subtitle: `${I18N.weekdayFull(entry.weekday)} · ${minutesToTimeInput(entry.start_minutes)}` },
+  );
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
