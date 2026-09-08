@@ -721,6 +721,36 @@ async function runFlows() {
     await page.close();
   });
 
+  // 16. Grid semantics: role=grid/row/gridcell, and every row (including the
+  // weekday header) exposes exactly 7 cells — the CSS-grid layout collapses
+  // to one column if a row wrapper isn't `display: contents` (see
+  // public/shared/theme.css's .calendar-row rule).
+  await flow(16, async () => {
+    const page = await newPage();
+    await page.goto(`${BASE}/b/${SLUG}`, { waitUntil: 'networkidle2' });
+    await page.waitForSelector(OPEN_DAY);
+
+    check('booker: calendar grid has role="grid"',
+      await page.$eval('.calendar-grid', (n) => n.getAttribute('role') === 'grid'));
+
+    const rowCellCounts = await page.$$eval('.calendar-grid [role="row"]',
+      (rows) => rows.map((r) => r.querySelectorAll('[role="gridcell"], [role="columnheader"]').length));
+    check('booker: every grid row exposes exactly 7 cells',
+      rowCellCounts.length > 0 && rowCellCounts.every((n) => n === 7), rowCellCounts.join(','));
+
+    const headerRoles = await page.$$eval('.calendar-weekday',
+      (els) => els.map((e) => e.getAttribute('role')));
+    check('booker: weekday headers are columnheaders, not aria-hidden',
+      headerRoles.length === 7 && headerRoles.every((r) => r === 'columnheader'), headerRoles.join(','));
+
+    // Layout must be unaffected: 7 columns, not 1.
+    const columns = await page.$eval('.calendar-grid',
+      (n) => new Set([...n.querySelectorAll('.calendar-day, .calendar-day-blank')].map((c) => c.getBoundingClientRect().left)).size);
+    check('booker: grid still lays out as 7 columns', columns === 7, String(columns));
+
+    await page.close();
+  });
+
 }
 
 // ── a11y: contrast, names, labels, heading order ────────────

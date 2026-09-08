@@ -736,6 +736,12 @@ input[type="checkbox"], input[type="radio"] {
   gap: 6px;
 }
 
+/* Row wrappers exist only so role="row" sits between role="grid" and
+   role="gridcell" in the accessibility tree — display: contents removes
+   them from layout entirely, so the day cells (not the rows) stay the
+   grid's items and the 7-column layout is unaffected. */
+.calendar-row { display: contents; }
+
 .calendar-weekday {
   text-align: center;
   font-size: 11px;

@@ -70,25 +70,45 @@ function createMonthCalendar(container, handlers) {
 
     const grid = UI.el('div', {
       class: 'calendar-grid',
-      attrs: { role: 'group', 'aria-label': `${I18N.monthName(m)} ${y}` },
+      attrs: { role: 'grid', 'aria-label': `${I18N.monthName(m)} ${y}` },
     });
 
+    // Row wrappers exist for the accessibility tree only — `display:
+    // contents` (theme.css) keeps them out of the 7-column layout so the
+    // grid items stay the day cells, not the rows. See hand-off §4.
+    const headerRow = UI.el('div', { class: 'calendar-row', attrs: { role: 'row' } });
     for (let d = 0; d < 7; d++) {
-      grid.appendChild(UI.el('div', {
+      headerRow.appendChild(UI.el('div', {
         class: 'calendar-weekday',
         text: I18N.weekdayShort(d),
-        attrs: { 'aria-hidden': 'true' },
+        attrs: { role: 'columnheader' },
       }));
     }
+    grid.appendChild(headerRow);
 
     const numDays = daysInMonth(y, m);
     const startWeekday = firstWeekdayOfMonth(y, m);
+    const totalCells = startWeekday + numDays;
+    const trailing = (7 - (totalCells % 7)) % 7;
+
+    let row = null;
+    const addCell = (node) => {
+      if (!row) {
+        row = UI.el('div', { class: 'calendar-row', attrs: { role: 'row' } });
+        grid.appendChild(row);
+      }
+      row.appendChild(node);
+      if (row.children.length === 7) row = null;
+    };
 
     // Leading placeholders hold their grid track without painting a card.
+    // Real (non-hidden) empty gridcells, not aria-hidden — a row claiming 7
+    // cells while hiding some of them would misreport its own column count.
     for (let i = 0; i < startWeekday; i++) {
-      grid.appendChild(UI.el('div', { attrs: { 'aria-hidden': 'true' } }));
+      addCell(UI.el('div', { class: 'calendar-day-blank', attrs: { role: 'gridcell' } }));
     }
 
+    const cells = new Map();
     let toFocus = null;
 
     for (let day = 1; day <= numDays; day++) {
@@ -99,16 +119,14 @@ function createMonthCalendar(container, handlers) {
 
       const btn = document.createElement('button');
       btn.type = 'button';
+      btn.setAttribute('role', 'gridcell');
       btn.className = 'calendar-day';
       btn.dataset.date = dateStr;
       btn.classList.add(`calendar-day--${cell.state || 'closed'}`);
       if (isToday) btn.classList.add('calendar-day--today');
       if (isPast) btn.classList.add('calendar-day--past');
       // aria-current is the source of truth for selection, per the project's
-      // "selected state comes from ARIA attributes, never a class" rule. The
-      // class stayed the only signal here, so the open day was styled but
-      // never conveyed to assistive tech — while theme.css already shipped a
-      // [aria-current="true"] rule that nothing ever triggered.
+      // "selected state comes from ARIA attributes, never a class" rule.
       if (dateStr === selectedDate) {
         btn.classList.add('is-selected');
         btn.setAttribute('aria-current', 'true');
@@ -125,15 +143,21 @@ function createMonthCalendar(container, handlers) {
       if (cell.disabled || isPast) {
         btn.setAttribute('aria-disabled', 'true');
       }
-      // Attached unconditionally now that unavailable cells stay in the
-      // focus order (aria-disabled, not disabled) — a disabled-looking cell
-      // that still fired onDayClick would open a day panel for a past date.
+      // Attached unconditionally — unavailable cells stay in the focus
+      // order (aria-disabled, not disabled), so the guard has to live here,
+      // not in whether the listener exists at all.
       btn.addEventListener('click', () => {
         if (btn.getAttribute('aria-disabled') === 'true') return;
         handlers.onDayClick(dateStr);
       });
+
       if (dateStr === focusedDate) toFocus = btn;
-      grid.appendChild(btn);
+      cells.set(dateStr, btn);
+      addCell(btn);
+    }
+
+    for (let i = 0; i < trailing; i++) {
+      addCell(UI.el('div', { class: 'calendar-day-blank', attrs: { role: 'gridcell' } }));
     }
 
     container.replaceChildren(buildNav(monthStr), grid);
