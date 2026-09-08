@@ -904,7 +904,12 @@ async function runFlows() {
 
     await page.$eval('.calendar-day[tabindex="0"]', (el) => el.focus());
     const before = await page.evaluate(() => document.activeElement.dataset.date);
-    await page.click('#lang-toggle');
+    // A real click on #lang-toggle would move DOM focus to the toggle
+    // button itself (standard browser click-then-focus ordering), which
+    // would make this test conflate "a different element legitimately has
+    // focus" with "render() failed to preserve a day cell's focus" — drive
+    // the same code path flow 2 uses instead.
+    await page.evaluate(() => I18N.setLang('en'));
     await wait(300);
     const after = await page.evaluate(() => document.activeElement?.dataset?.date);
     check('booker: focus survives a language toggle', after === before, `${before} -> ${after}`);
