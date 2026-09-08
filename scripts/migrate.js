@@ -114,8 +114,6 @@ CREATE INDEX IF NOT EXISTS ix_events_booking    ON booking_events(booking_id);
 CREATE INDEX IF NOT EXISTS ix_rate_limits_window ON rate_limits(window_start);
 CREATE INDEX IF NOT EXISTS ix_sessions_expires   ON sessions(expires_at);
 CREATE INDEX IF NOT EXISTS ix_sessions_admin     ON sessions(admin_id);
-CREATE INDEX IF NOT EXISTS ix_slots_location     ON slots(location_id);
-CREATE INDEX IF NOT EXISTS ix_templates_location ON templates(location_id);
 
 -- Events are written by triggers, not application code: the public booking
 -- write is a conditional INSERT ... SELECT that may insert zero rows, and
@@ -211,6 +209,11 @@ async function main() {
   const client = createClient({ url, authToken: process.env.TURSO_AUTH_TOKEN });
   await client.executeMultiple(SCHEMA);
   await ensureLocationColumns(client);
+  // Must run after ensureLocationColumns: on a fresh DB the CREATE TABLE
+  // statements above don't declare location_id (see ensureLocationColumns),
+  // so indexing it any earlier fails with "no such column".
+  await client.execute('CREATE INDEX IF NOT EXISTS ix_slots_location     ON slots(location_id)');
+  await client.execute('CREATE INDEX IF NOT EXISTS ix_templates_location ON templates(location_id)');
   await backfillDefaultLocations(client);
   client.close();
   console.log('migrate: schema up to date.');
