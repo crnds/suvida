@@ -872,7 +872,7 @@ input[type="checkbox"], input[type="radio"] {
    booker, twenty "no slots" labels used to shout over the five days that
    actually had availability. */
 .calendar-day.calendar-day--closed { background: transparent; border-color: var(--border-subtle); color: var(--text-quiet); }
-.calendar-day.calendar-day--past { background: transparent; border-color: transparent; color: var(--text-inactive); }
+.calendar-day.calendar-day--past { background: transparent; border-color: color-mix(in srgb, currentColor 35%, transparent); color: var(--text-inactive); }
 .calendar-day--past .calendar-day__info,
 .calendar-day--past .calendar-day__counts { display: none; }
 
