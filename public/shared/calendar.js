@@ -123,11 +123,16 @@ function createMonthCalendar(container, handlers) {
       btn.setAttribute('aria-label', parts.join(', '));
 
       if (cell.disabled || isPast) {
-        btn.disabled = true;
-      } else {
-        btn.addEventListener('click', () => handlers.onDayClick(dateStr));
+        btn.setAttribute('aria-disabled', 'true');
       }
-      if (dateStr === focusedDate && !btn.disabled) toFocus = btn;
+      // Attached unconditionally now that unavailable cells stay in the
+      // focus order (aria-disabled, not disabled) — a disabled-looking cell
+      // that still fired onDayClick would open a day panel for a past date.
+      btn.addEventListener('click', () => {
+        if (btn.getAttribute('aria-disabled') === 'true') return;
+        handlers.onDayClick(dateStr);
+      });
+      if (dateStr === focusedDate) toFocus = btn;
       grid.appendChild(btn);
     }
 

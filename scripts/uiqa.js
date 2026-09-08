@@ -71,6 +71,7 @@ if (!CHROME) {
 }
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+const OPEN_DAY = '.calendar-day:not([aria-disabled="true"])';
 
 // ── result tracking ─────────────────────────────────────────
 
@@ -178,9 +179,9 @@ async function runFlows() {
   await flow(1, async () => {
     const page = await newPage();
     await page.goto(`${BASE}/b/${SLUG}`, { waitUntil: 'networkidle2' });
-    await page.waitForSelector('.calendar-day:not(:disabled)');
+    await page.waitForSelector(OPEN_DAY);
 
-    await page.click('.calendar-day:not(:disabled)');
+    await page.click(OPEN_DAY);
     await page.waitForSelector('.slot-list__item');
     check('booker: tapped day gets a selected state',
       await page.$eval('.calendar-day.is-selected', (n) => !!n).catch(() => false));
@@ -223,8 +224,8 @@ async function runFlows() {
 
     // The details were typed once already; a second booking must not ask again.
     await page.click('#tab-btn-book');
-    await page.waitForSelector('.calendar-day:not(:disabled)');
-    await page.click('.calendar-day:not(:disabled)');
+    await page.waitForSelector(OPEN_DAY);
+    await page.click(OPEN_DAY);
     await page.waitForSelector('.slot-list__item');
     await page.click('.slot-list__item');
     await page.waitForSelector('#bf-name');
@@ -246,9 +247,9 @@ async function runFlows() {
     // Release the slot this flow just consumed. Without it every run booked
     // one more lesson against the QA teacher and never gave it back, so the
     // current month drained (25 slots left, all in the NEXT month, after ~30
-    // accumulated bookings) and flows 1 and 8 started failing on
-    // `.calendar-day:not(:disabled)` for reasons that had nothing to do with
-    // the code under test.
+    // accumulated bookings) and flows 1 and 8 started failing to find an
+    // open day (OPEN_DAY) for reasons that had nothing to do with the code
+    // under test.
     const released = await page.evaluate(async (slug) => {
       const hist = await fetch('/api/public/history', {
         method: 'POST',
@@ -280,8 +281,8 @@ async function runFlows() {
   await flow(2, async () => {
     const page = await newPage();
     await page.goto(`${BASE}/b/${SLUG}`, { waitUntil: 'networkidle2' });
-    await page.waitForSelector('.calendar-day:not(:disabled)');
-    await page.click('.calendar-day:not(:disabled)');
+    await page.waitForSelector(OPEN_DAY);
+    await page.click(OPEN_DAY);
     await page.waitForSelector('.slot-list__item');
     const before = await page.$eval('.modal__title', (n) => n.textContent);
     // The overlay covers the header (correctly), so the toggle is not
@@ -326,10 +327,10 @@ async function runFlows() {
     const page = await newPage({ width: 1100 });
     await signIn(page);
     await page.goto(`${BASE}/admin/`, { waitUntil: 'networkidle2' });
-    await page.waitForSelector('.calendar-day:not(:disabled)', { timeout: 8000 });
+    await page.waitForSelector(OPEN_DAY, { timeout: 8000 });
 
     let opened = false;
-    for (const day of await page.$$('.calendar-day:not(:disabled)')) {
+    for (const day of await page.$$(OPEN_DAY)) {
       await day.click();
       await page.waitForSelector('.modal .list', { timeout: 5000 });
       await wait(400);
@@ -428,8 +429,8 @@ async function runFlows() {
   await flow(8, async () => {
     const page = await newPage();
     await page.goto(`${BASE}/b/${SLUG}`, { waitUntil: 'networkidle2' });
-    await page.waitForSelector('.calendar-day:not(:disabled)');
-    await page.click('.calendar-day:not(:disabled)');
+    await page.waitForSelector(OPEN_DAY);
+    await page.click(OPEN_DAY);
     await page.waitForSelector('.slot-list__item');
     await page.click('.slot-list__item');
     await page.waitForSelector('#bf-submit');
@@ -655,12 +656,12 @@ async function runFlows() {
     await signIn(page, 'admin');
     await page.goto(`${BASE}/admin/`, { waitUntil: 'networkidle2' });
     await wait(600);
-    await page.waitForSelector('.calendar-day:not(:disabled)', { timeout: 8000 });
+    await page.waitForSelector(OPEN_DAY, { timeout: 8000 });
 
     // Find a day that actually HAS a booking — only a booked row carries the
     // edit/move/cancel trio this flow needs. Same search as flow 4.
     let opened = false;
-    for (const day of await page.$$('.calendar-day:not(:disabled)')) {
+    for (const day of await page.$$(OPEN_DAY)) {
       await day.click();
       await page.waitForSelector('.modal .list', { timeout: 5000 });
       await wait(400);
@@ -821,8 +822,8 @@ async function runA11y() {
   await auditPage('booker', `/b/${SLUG}`);
   await auditPage('booker@320', `/b/${SLUG}`, null, 320);
   await auditPage('booker day', `/b/${SLUG}`, async (p) => {
-    await p.waitForSelector('.calendar-day:not(:disabled)');
-    await p.click('.calendar-day:not(:disabled)');
+    await p.waitForSelector(OPEN_DAY);
+    await p.click(OPEN_DAY);
     await p.waitForSelector('.slot-list__item');
   });
   await auditPage('booker history', `/b/${SLUG}`, (p) => p.click('#tab-btn-history'));
@@ -899,8 +900,8 @@ async function runShots() {
   mkdirSync(OUT, { recursive: true });
 
   const openDay = async (p) => {
-    await p.waitForSelector('.calendar-day:not(:disabled)', { timeout: 5000 });
-    await p.click('.calendar-day:not(:disabled)');
+    await p.waitForSelector(OPEN_DAY, { timeout: 5000 });
+    await p.click(OPEN_DAY);
     await p.waitForSelector('.modal', { timeout: 5000 });
   };
 

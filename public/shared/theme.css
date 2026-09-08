@@ -781,8 +781,9 @@ input[type="checkbox"], input[type="radio"] {
 .calendar-day__dot.calendar-day__dot--booked { background: var(--primary); }
 .calendar-day__dot.calendar-day__dot--blocked { background: var(--text-quiet); }
 
-/* State fills. Written at (0,2,0) so they outrank `.calendar-day:disabled`,
-   which most closed and every past day also matches. */
+/* State fills. Written at (0,2,0) so they outrank `.calendar-day:disabled`
+   and `.calendar-day[aria-disabled="true"]` (class + attribute is also
+   (0,2,0)), which most closed and every past day also matches. */
 .calendar-day.calendar-day--free { background: var(--surface-success); border-color: var(--border-success); color: var(--color-success); }
 .calendar-day.calendar-day--full { background: var(--surface-error); border-color: var(--border-error); color: var(--color-error); }
 /* A day with nothing on it should recede, not announce itself: on the
@@ -804,8 +805,8 @@ input[type="checkbox"], input[type="radio"] {
 .calendar-day--today { box-shadow: inset 0 0 0 2px var(--primary); }
 .calendar-day--today .calendar-day__num { font-weight: 600; }
 
-.calendar-day:hover:not(:disabled) { border-color: var(--primary); }
-.calendar-day:disabled { cursor: default; }
+.calendar-day:hover:not(:disabled):not([aria-disabled="true"]) { border-color: var(--primary); }
+.calendar-day:disabled, .calendar-day[aria-disabled="true"] { cursor: default; }
 /* The tapped day, held while its slots load and while its panel is open. */
 .calendar-day[aria-current="true"],
 .calendar-day.is-selected {
