@@ -917,6 +917,45 @@ async function runFlows() {
     await page.close();
   });
 
+  // 22. Same roving-tabindex guarantee, on admin's calendar tab (width 1100,
+  // different cell content, day panel instead of a slot-list modal).
+  await flow(22, async () => {
+    const page = await newPage({ width: 1100 });
+    await signIn(page);
+    await page.goto(`${BASE}/admin/`, { waitUntil: 'networkidle2' });
+    await page.waitForSelector('.calendar-day', { timeout: 8000 });
+
+    const zeroTabs = await page.$$eval('.calendar-day[tabindex="0"]', (els) => els.length);
+    check('admin: exactly one calendar day is a tab stop', zeroTabs === 1, String(zeroTabs));
+
+    check('admin: calendar grid has role="grid"',
+      await page.$eval('.calendar-grid', (n) => n.getAttribute('role') === 'grid'));
+
+    await page.close();
+  });
+
+  // 23. Same month-crossing focus guarantee, on admin.
+  await flow(23, async () => {
+    const page = await newPage({ width: 1100 });
+    await signIn(page);
+    await page.goto(`${BASE}/admin/`, { waitUntil: 'networkidle2' });
+    await page.waitForSelector('.calendar-day', { timeout: 8000 });
+
+    const startLabel = await page.$eval('.calendar-nav__label', (n) => n.textContent);
+    await page.$eval('.calendar-day[tabindex="0"]', (el) => el.focus());
+    await page.keyboard.press('PageDown');
+    await page.waitForFunction(
+      (prev) => document.querySelector('.calendar-nav__label')?.textContent !== prev,
+      { timeout: 8000 }, startLabel,
+    );
+    await page.waitForFunction(() => !!document.activeElement?.closest?.('.calendar-day'), { timeout: 8000 });
+    const landedDate = await page.evaluate(() => document.activeElement.closest('.calendar-day').dataset.date);
+    check('admin: PageDown lands focus on a day cell in the next month',
+      !!landedDate && landedDate.slice(0, 7) !== startLabel, landedDate);
+
+    await page.close();
+  });
+
 }
 
 // ── a11y: contrast, names, labels, heading order ────────────

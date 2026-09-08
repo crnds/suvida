@@ -10,6 +10,7 @@ State as of the front-end design pass (branch `redesign/frontend-polish`).
 > | --- | --- |
 > | §1.1 slug mismatch | **Fixed.** Public side widened to `[a-z0-9-]{3,32}`; one definition in `api/_lib/slug.js`, mirrored in `public/shared/validate.js`, plus a reserved-word list. Smoke test 27 walks a custom slug end to end. |
 > | §1.3 function ceiling never checked | **Checked.** `vercel build` turns out not to need `vercel login` here. Exactly 3 functions; `puppeteer-core` did not breach the cap. A skipped test20 is also no longer counted as a pass. |
+> | §3.1 calendar keyboard nav | **Fixed.** `public/shared/calendar.js` now exposes `role="grid"/"row"/"gridcell"`, a roving `tabindex` (exactly one day is a default tab stop), and arrow/Home/End/PageUp/PageDown traversal with correct cross-month focus landing. Verified on both surfaces — booker flows 16-21 and admin mirrors 22-23 in `scripts/uiqa.js`. Live screen-reader listening (§2.2) is still outstanding; this only closes the programmatic-semantics gap. |
 > | §3.2 slot dots under-report | Still open (cosmetic). |
 > | §3.3 out-of-order responses | **Mostly fixed.** The log and the admin day panel now carry request tokens; notifications and the locations list still do not. |
 > | §4 QA harness gaps | **Partly fixed.** Per-case isolation, a preflight, self-cleanup, and five new flows (session expiry, logout-survives-reload, double-tap confirm, nested-modal Escape, `$&` interpolation). Owner flows and the phone-lookup path remain uncovered. |
