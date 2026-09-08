@@ -160,6 +160,16 @@ function createMonthCalendar(container, handlers) {
       addCell(UI.el('div', { class: 'calendar-day-blank', attrs: { role: 'gridcell' } }));
     }
 
+    // Roving tabindex: exactly one cell is a tab stop. Priority: the
+    // selected day, then today (if in this month), then the 1st.
+    const firstDayStr = `${y}-${String(m).padStart(2, '0')}-01`;
+    const rovingDate = (selectedDate && cells.has(selectedDate)) ? selectedDate
+      : cells.has(today) ? today
+      : firstDayStr;
+    cells.forEach((btn, dateStr) => {
+      btn.setAttribute('tabindex', dateStr === rovingDate ? '0' : '-1');
+    });
+
     container.replaceChildren(buildNav(monthStr), grid);
     toFocus?.focus({ preventScroll: true });
   }

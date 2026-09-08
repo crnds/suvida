@@ -773,6 +773,26 @@ async function runFlows() {
     await page.close();
   });
 
+  // 17. Roving tabindex: exactly one day cell is a default tab stop, so
+  // reaching the end of a month no longer takes ~30 Tab presses.
+  await flow(17, async () => {
+    const page = await newPage();
+    await page.goto(`${BASE}/b/${SLUG}`, { waitUntil: 'networkidle2' });
+    await page.waitForSelector(OPEN_DAY);
+
+    const zeroTabs = await page.$$eval('.calendar-day[tabindex="0"]', (els) => els.length);
+    check('booker: exactly one calendar day is a tab stop', zeroTabs === 1, String(zeroTabs));
+
+    const [negTabs, allDays] = await Promise.all([
+      page.$$eval('.calendar-day[tabindex="-1"]', (els) => els.length),
+      page.$$eval('.calendar-day', (els) => els.length),
+    ]);
+    check('booker: every other day cell is removed from the default tab order',
+      negTabs === allDays - 1, `${negTabs} of ${allDays - 1}`);
+
+    await page.close();
+  });
+
 }
 
 // ── a11y: contrast, names, labels, heading order ────────────
