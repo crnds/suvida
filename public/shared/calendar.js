@@ -11,6 +11,28 @@ function shiftMonthString(monthStr, delta) {
   return `${y}-${String(m).padStart(2, '0')}`;
 }
 
+function shiftDateString(dateStr, deltaDays) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d + deltaDays));
+  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`;
+}
+
+function weekdayOf(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+}
+
+// PageUp/PageDown: same day-of-month in the adjacent month, clamped so
+// "31st, PageDown" from a 31-day month into a 30-day one lands on the 30th
+// instead of rolling into the month after.
+function shiftMonthDateString(dateStr, deltaMonths) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const monthStr = shiftMonthString(`${y}-${String(m).padStart(2, '0')}`, deltaMonths);
+  const [ny, nm] = monthStr.split('-').map(Number);
+  const clampedDay = Math.min(d, daysInMonth(ny, nm));
+  return `${ny}-${String(nm).padStart(2, '0')}-${String(clampedDay).padStart(2, '0')}`;
+}
+
 function daysInMonth(y, m) { return new Date(Date.UTC(y, m, 0)).getUTCDate(); }
 function firstWeekdayOfMonth(y, m) { return new Date(Date.UTC(y, m - 1, 1)).getUTCDay(); }
 
@@ -22,6 +44,7 @@ function firstWeekdayOfMonth(y, m) { return new Date(Date.UTC(y, m - 1, 1)).getU
 function createMonthCalendar(container, handlers) {
   let currentMonth = null;
   let selectedDate = null;
+  let pendingFocusDate = null;
 
   // The nav is built separately from the grid so loading and error states can
   // keep it on screen. Replacing the whole container (as this used to do) left
@@ -168,6 +191,45 @@ function createMonthCalendar(container, handlers) {
       : firstDayStr;
     cells.forEach((btn, dateStr) => {
       btn.setAttribute('tabindex', dateStr === rovingDate ? '0' : '-1');
+    });
+
+    const ARROW_DELTA = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7 };
+
+    function moveFocusTo(target) {
+      const targetMonth = target.slice(0, 7);
+      if (targetMonth === currentMonth) {
+        const btn2 = cells.get(target);
+        if (!btn2) return;
+        cells.forEach((b, d2) => b.setAttribute('tabindex', d2 === target ? '0' : '-1'));
+        btn2.focus({ preventScroll: true });
+      } else {
+        // The target isn't rendered yet — the consumer has to fetch the new
+        // month first. render() picks this up on the far side of that fetch
+        // (Task 6); until then, this just pages the month.
+        pendingFocusDate = target;
+        handlers.onMonthChange(targetMonth);
+      }
+    }
+
+    grid.addEventListener('keydown', (e) => {
+      const btn = e.target.closest('.calendar-day');
+      if (!btn) return;
+      const date = btn.dataset.date;
+      let target;
+
+      if (e.key in ARROW_DELTA) {
+        target = shiftDateString(date, ARROW_DELTA[e.key]);
+      } else if (e.key === 'Home' || e.key === 'End') {
+        const dow = weekdayOf(date);
+        target = shiftDateString(date, e.key === 'Home' ? -dow : (6 - dow));
+      } else if (e.key === 'PageUp' || e.key === 'PageDown') {
+        target = shiftMonthDateString(date, e.key === 'PageUp' ? -1 : 1);
+      } else {
+        return;
+      }
+
+      e.preventDefault();
+      moveFocusTo(target);
     });
 
     container.replaceChildren(buildNav(monthStr), grid);

@@ -73,6 +73,19 @@ if (!CHROME) {
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const OPEN_DAY = '.calendar-day:not([aria-disabled="true"])';
 
+// Pure reference date math for test assertions — computes the *expected*
+// value independently of calendar.js, so a bug in the app's own arithmetic
+// can't cancel out against the test's.
+function shiftISO(dateStr, deltaDays) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d + deltaDays));
+  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`;
+}
+function weekdayOfISO(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+}
+
 // ── result tracking ─────────────────────────────────────────
 
 let pass = 0;
@@ -789,6 +802,47 @@ async function runFlows() {
     ]);
     check('booker: every other day cell is removed from the default tab order',
       negTabs === allDays - 1, `${negTabs} of ${allDays - 1}`);
+
+    await page.close();
+  });
+
+  // 18. Arrow/Home/End traversal within a month. Day 15 is used as the
+  // anchor because +-7 and the week bounds around it never cross a month
+  // boundary for any month length.
+  await flow(18, async () => {
+    const page = await newPage();
+    await page.goto(`${BASE}/b/${SLUG}`, { waitUntil: 'networkidle2' });
+    await page.waitForSelector(OPEN_DAY);
+
+    const anchor = await page.evaluate(() => {
+      const m = document.querySelector('.calendar-nav__label').textContent;
+      return m;
+    });
+    const [, monthNum] = await page.$eval('.calendar-day[data-date]', (n) => n.dataset.date.split('-'));
+    const year = await page.$eval('.calendar-day[data-date]', (n) => n.dataset.date.split('-')[0]);
+    const day15 = `${year}-${monthNum}-15`;
+
+    await page.evaluate((d) => document.querySelector(`.calendar-day[data-date="${d}"]`)?.focus(), day15);
+    check('booker: day 15 can receive focus', await page.evaluate(() => document.activeElement.dataset.date) === day15);
+
+    const press = async (key) => {
+      await page.keyboard.press(key);
+      return page.evaluate(() => document.activeElement.dataset.date);
+    };
+
+    check('booker: ArrowRight moves one day forward', await press('ArrowRight') === shiftISO(day15, 1));
+    await page.evaluate((d) => document.querySelector(`.calendar-day[data-date="${d}"]`)?.focus(), day15);
+    check('booker: ArrowLeft moves one day back', await press('ArrowLeft') === shiftISO(day15, -1));
+    await page.evaluate((d) => document.querySelector(`.calendar-day[data-date="${d}"]`)?.focus(), day15);
+    check('booker: ArrowDown moves one week forward', await press('ArrowDown') === shiftISO(day15, 7));
+    await page.evaluate((d) => document.querySelector(`.calendar-day[data-date="${d}"]`)?.focus(), day15);
+    check('booker: ArrowUp moves one week back', await press('ArrowUp') === shiftISO(day15, -7));
+
+    await page.evaluate((d) => document.querySelector(`.calendar-day[data-date="${d}"]`)?.focus(), day15);
+    const dow = weekdayOfISO(day15);
+    check('booker: Home moves to the first day of the week', await press('Home') === shiftISO(day15, -dow));
+    await page.evaluate((d) => document.querySelector(`.calendar-day[data-date="${d}"]`)?.focus(), day15);
+    check('booker: End moves to the last day of the week', await press('End') === shiftISO(day15, 6 - dow));
 
     await page.close();
   });
