@@ -39,6 +39,11 @@ const els = {
   lookupSubmit: document.getElementById('lookup-submit'),
   lookupError: document.getElementById('lookup-error'),
   lookupResults: document.getElementById('lookup-results'),
+  menuBtn: document.getElementById('menu-btn'),
+  drawer: document.getElementById('nav-drawer'),
+  drawerScrim: document.getElementById('drawer-scrim'),
+  drawerClose: document.getElementById('drawer-close'),
+  drawerTabs: document.getElementById('drawer-tabs'),
 };
 
 mountLangToggle(document.getElementById('lang-toggle'));
@@ -61,11 +66,43 @@ document.addEventListener('i18n:changed', () => {
 
 // ── Tabs ───────────────────────────────────────────────────
 
+// The tab bar lives in the nav drawer, so picking a section also closes it.
+// The drawer is a plain panel, not a UI.showModal() dialog: it sits alongside
+// the modal stack (a booking modal can be open while the drawer opens), which
+// showModal's park-the-parent behaviour would get wrong.
+function openDrawer() {
+  els.drawer.classList.remove('hidden');
+  els.drawerScrim.classList.remove('hidden');
+  els.menuBtn.setAttribute('aria-expanded', 'true');
+  document.body.classList.add('is-modal-open');
+  els.drawerClose.focus();
+}
+
+function closeDrawer() {
+  if (els.drawer.classList.contains('hidden')) return;
+  els.drawer.classList.add('hidden');
+  els.drawerScrim.classList.add('hidden');
+  els.menuBtn.setAttribute('aria-expanded', 'false');
+  // Keep the scroll lock if a modal is still open above the drawer.
+  if (!document.querySelector('#modal-root .modal-overlay')) {
+    document.body.classList.remove('is-modal-open');
+  }
+  if (els.drawer.contains(document.activeElement)) els.menuBtn.focus();
+}
+
+els.menuBtn.addEventListener('click', openDrawer);
+els.drawerClose.addEventListener('click', closeDrawer);
+els.drawerScrim.addEventListener('click', closeDrawer);
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeDrawer();
+});
+
 const tabs = UI.wireTabs(
   { book: els.tabBtnBook, history: els.tabBtnHistory },
   { book: els.tabBook, history: els.tabHistory },
   (tab) => {
     STATE.activeTab = tab;
+    closeDrawer();
     if (tab === 'history') {
       // Paint the cache immediately, then correct it against the server —
       // the cached copy can be stale by a move or a cancellation.
@@ -208,6 +245,9 @@ function renderMonthError(err) {
 function showNotFound() {
   els.notFound.classList.remove('hidden');
   els.appBody.classList.add('hidden');
+  // The tabs switch between panels inside the hidden #app-body, so on the
+  // not-found page the drawer offers only the language switcher.
+  els.drawerTabs.classList.add('hidden');
   // Revealing a role="alert" that was already in the DOM does not reliably
   // announce; say it explicitly.
   UI.announce(I18N.t('booker_teacher_not_found'), true);

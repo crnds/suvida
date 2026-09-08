@@ -73,6 +73,19 @@ if (!CHROME) {
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const OPEN_DAY = '.calendar-day:not([aria-disabled="true"])';
 
+// The booker's tab bar lives in the nav drawer — open it before clicking a
+// tab. The drawer closes itself once a tab is picked.
+// A JS click, not p.click(): the header brand swaps text when the month load
+// lands ("Suvida Piano Studio" -> teacher name), shifting the button, and
+// Puppeteer's hit-test then intermittently reports the node as not clickable.
+async function openBookerDrawer(p) {
+  await p.waitForSelector('#menu-btn', { visible: true, timeout: 5000 });
+  await p.$eval('#menu-btn', (b) => b.click());
+  await p.waitForSelector('#nav-drawer:not(.hidden)', { visible: true, timeout: 5000 });
+  // Let the slide-in animation finish before the caller clicks a tab.
+  await wait(300);
+}
+
 // Pure reference date math for test assertions — computes the *expected*
 // value independently of calendar.js, so a bug in the app's own arithmetic
 // can't cancel out against the test's.
@@ -245,6 +258,7 @@ async function runFlows() {
       (await page.$$('#local-bookings .list-row')).length > 0);
 
     // The details were typed once already; a second booking must not ask again.
+    await openBookerDrawer(page);
     await page.click('#tab-btn-book');
     await page.waitForSelector(OPEN_DAY);
     await page.click(OPEN_DAY);
@@ -1121,7 +1135,7 @@ async function runA11y() {
     await p.click(OPEN_DAY);
     await p.waitForSelector('.slot-list__item');
   });
-  await auditPage('booker history', `/b/${SLUG}`, (p) => p.click('#tab-btn-history'));
+  await auditPage('booker history', `/b/${SLUG}`, async (p) => { await openBookerDrawer(p); await p.click('#tab-btn-history'); });
   await auditPage('admin calendar', '/admin/');
   await auditPage('admin schedule', '/admin/', (p) => p.click('#tab-btn-schedule'));
   await auditPage('admin log', '/admin/', async (p) => { await p.click('#tab-btn-log'); await wait(900); });
@@ -1210,7 +1224,7 @@ async function runShots() {
       await p.click('.slot-list__item');
       await p.waitForSelector('#booking-form', { timeout: 5000 });
     }),
-    bookerhistory: () => shoot('bookerhistory', `/b/${SLUG}`, (p) => p.click('#tab-btn-history')),
+    bookerhistory: () => shoot('bookerhistory', `/b/${SLUG}`, async (p) => { await openBookerDrawer(p); await p.click('#tab-btn-history'); }),
     adminlogin: () => shoot('adminlogin', '/admin/', (p) => p.waitForSelector('#login-username', { visible: true }), { anon: true }),
     ownerlogin: () => shoot('ownerlogin', '/owner/', (p) => p.waitForSelector('#login-username', { visible: true }), { anon: true }),
     admincalendar: () => shoot('admincalendar', '/admin/', () => wait(400)),

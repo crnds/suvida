@@ -65,6 +65,8 @@ const DICT = {
     a11y_admin_sections: 'ส่วนต่าง ๆ สำหรับครู',
     a11y_legend: 'คำอธิบายสัญลักษณ์',
     a11y_language: 'ภาษา',
+    a11y_menu: 'เมนู',
+    a11y_menu_close: 'ปิดเมนู',
     title_admin: 'สำหรับครู — Suvida Piano Studio',
     title_owner: 'ผู้ดูแลระบบ — Suvida Piano Studio',
 
@@ -317,6 +319,8 @@ const DICT = {
     a11y_admin_sections: 'Admin sections',
     a11y_legend: 'Legend',
     a11y_language: 'Language',
+    a11y_menu: 'Menu',
+    a11y_menu_close: 'Close menu',
     title_admin: 'Teacher — Suvida Piano Studio',
     title_owner: 'Owner — Suvida Piano Studio',
 

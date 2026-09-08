@@ -311,6 +311,82 @@ h1, h2, h3, h4, .text-hero, .text-h1, .text-h2, .text-h3 {
 }
 .tab-badge:empty { display: none; }
 
+/* ── Nav drawer (booker page) ───────────────────────────── */
+
+/* Icon-only header button. Deliberately not a .btn: the header action rules
+   (theme.css :1018-1019) hide .btn labels on narrow screens, and this button
+   has no label to hide. */
+.menu-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--tap-min);
+  min-height: var(--tap-min);
+  padding: 0 var(--space-2);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: 18px;
+  cursor: pointer;
+  transition: background-color var(--dur) var(--ease);
+}
+.menu-btn:hover { background: var(--surface-alt); }
+
+.nav-drawer-scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(26, 24, 21, 0.5);
+  z-index: var(--z-modal);
+  animation: overlay-in var(--dur) var(--ease);
+}
+
+/* Same z-index as the scrim; it wins by coming later in the DOM. */
+.nav-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  height: 100dvh;
+  width: min(320px, 85vw);
+  background: var(--surface-card);
+  border-left: var(--border-w) solid var(--border);
+  z-index: var(--z-modal);
+  padding: var(--space-3);
+  padding-top: max(var(--space-3), env(safe-area-inset-top));
+  padding-bottom: max(var(--space-3), env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  animation: drawer-in var(--dur) var(--ease);
+}
+@keyframes drawer-in { from { transform: translateX(100%); } }
+
+.nav-drawer__head { display: flex; justify-content: flex-end; }
+
+/* Tabs run vertically in the drawer: no edge fade, full-width rows, and the
+   active underline becomes a left rail. */
+.nav-drawer .tabs {
+  flex-direction: column;
+  border-bottom: none;
+  margin-bottom: 0;
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+.nav-drawer .tab { width: 100%; padding: 0 var(--space-2); }
+.nav-drawer .tab[aria-selected="true"]::after {
+  left: calc(-1 * var(--space-2));
+  right: auto;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  height: auto;
+}
+
+.nav-drawer__lang {
+  border-top: var(--border-w) solid var(--border);
+  padding-top: var(--space-3);
+}
+
 /* ── Icons ──────────────────────────────────────────────── */
 /* Font Awesome, used only where it aids scanning. Every icon is decorative
    at the a11y layer (aria-hidden) and sits beside real text, so a blocked
