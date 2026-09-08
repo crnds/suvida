@@ -81,6 +81,18 @@ function check(name, ok, detail) {
   else { fail++; console.log(`FAIL  ${name}${detail ? `  → ${detail}` : ''}`); }
 }
 
+// Per-flow isolation. Without this a single throw anywhere in runFlows()
+// escaped to the top-level try/finally, which closed the browser but skipped
+// the tally and the exit code entirely — so a hard failure printed no result
+// at all. Now one broken flow fails just itself and the rest still run.
+async function flow(num, fn) {
+  try {
+    await fn();
+  } catch (e) {
+    check(`flow ${num}: completed without throwing`, false, e.message);
+  }
+}
+
 // ── browser helpers ─────────────────────────────────────────
 
 const browser = await puppeteer.launch({
@@ -127,6 +139,23 @@ async function sessionCookie(path, body) {
   return sessionCache.get(key);
 }
 
+// A session that is NOT shared through sessionCache. Any flow that logs out
+// or lets a session expire must use this: revoking the cached cookie would
+// invalidate it for every other flow that reuses it.
+async function freshSignIn(page, role = 'admin') {
+  const [path, body] = role === 'owner'
+    ? ['/api/owner/login', { username: OWNER, password: OWNER_PASSWORD, remember: true }]
+    : ['/api/admin/login', { username: TEACHER, password: TEACHER_PASSWORD, remember: true }];
+  const res = await fetch(BASE + path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const m = /suvida_session=([^;]+)/.exec(res.headers.get('set-cookie') || '');
+  if (!m) throw new Error(`freshSignIn failed (${res.status})`);
+  await page.setCookie({ name: 'suvida_session', value: m[1], domain: new URL(BASE).hostname, path: '/' });
+}
+
 async function signIn(page, role = 'admin') {
   const [path, body] = role === 'owner'
     ? ['/api/owner/login', { username: OWNER, password: OWNER_PASSWORD, remember: true }]
@@ -146,7 +175,7 @@ async function runFlows() {
   console.log('\n=== flows ===');
 
   // 1. Student books a lesson, end to end.
-  {
+  await flow(1, async () => {
     const page = await newPage();
     await page.goto(`${BASE}/b/${SLUG}`, { waitUntil: 'networkidle2' });
     await page.waitForSelector('.calendar-day:not(:disabled)');
@@ -165,6 +194,11 @@ async function runFlows() {
     check('booker: booking form offers a way back to the slot list',
       await page.$eval('.modal__back', (n) => !!n).catch(() => false));
 
+    // Wait for the field itself, not just the form: #booking-form can match a
+    // render that is replaced a tick later, and page.type() then throws
+    // "No element found" instead of waiting. Intermittent, ~1 run in 5.
+    await page.waitForSelector('#bf-name');
+    await page.waitForSelector('#bf-phone');
     await page.type('#bf-name', 'QA Student');
     await page.type('#bf-phone', 'abc');
     await page.click('#bf-submit');
@@ -209,15 +243,41 @@ async function runFlows() {
     await page.keyboard.press('Escape');
     await wait(250);
     check('booker: a second Escape closes the sheet', (await page.$$('.modal')).length === 0);
+    // Release the slot this flow just consumed. Without it every run booked
+    // one more lesson against the QA teacher and never gave it back, so the
+    // current month drained (25 slots left, all in the NEXT month, after ~30
+    // accumulated bookings) and flows 1 and 8 started failing on
+    // `.calendar-day:not(:disabled)` for reasons that had nothing to do with
+    // the code under test.
+    const released = await page.evaluate(async (slug) => {
+      const hist = await fetch('/api/public/history', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slug, phone: '0891112233' }),
+      }).then((r) => r.json()).catch(() => ({}));
+      let n = 0;
+      for (const b of hist.bookings || []) {
+        const res = await fetch('/api/public/cancel', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ slug, booking_id: b.id, phone: '0891112233' }),
+        });
+        if (res.ok) n++;
+      }
+      return n;
+    }, SLUG);
+    check('booker: the QA booking is released so the dataset does not drain',
+      released >= 1, `cancelled ${released}`);
+
     check('booker: scroll lock released',
       await page.evaluate(() => !document.body.classList.contains('is-modal-open')));
 
     check('booker: no console errors', page.errors.length === 0, page.errors.join(' | '));
     await page.close();
-  }
+  });
 
   // 2. An open modal must not be stranded in the previous language.
-  {
+  await flow(2, async () => {
     const page = await newPage();
     await page.goto(`${BASE}/b/${SLUG}`, { waitUntil: 'networkidle2' });
     await page.waitForSelector('.calendar-day:not(:disabled)');
@@ -233,10 +293,10 @@ async function runFlows() {
       after && after !== before && /Open times/.test(after), `${before} -> ${after}`);
     check('booker: no console errors on language switch', page.errors.length === 0, page.errors.join(' | '));
     await page.close();
-  }
+  });
 
   // 3. A failed month must not be a dead end.
-  {
+  await flow(3, async () => {
     const page = await newPage();
     await page.setRequestInterception(true);
     let blocked = true;
@@ -257,12 +317,12 @@ async function runFlows() {
       check('booker: retry recovers the month', true);
     }
     await page.close();
-  }
+  });
 
   // 4. The detached-node regression: a modal opened from inside the day panel
   // used to destroy the panel, so every later refresh painted into an orphan.
   // Editing a booking is used because it cannot fail with a 409.
-  {
+  await flow(4, async () => {
     const page = await newPage({ width: 1100 });
     await signIn(page);
     await page.goto(`${BASE}/admin/`, { waitUntil: 'networkidle2' });
@@ -310,10 +370,10 @@ async function runFlows() {
     }
     check('admin: no console errors', page.errors.length === 0, page.errors.join(' | '));
     await page.close();
-  }
+  });
 
   // 5. Re-labelling the log filters must not silently reset them.
-  {
+  await flow(5, async () => {
     const page = await newPage({ width: 1100 });
     await signIn(page);
     await page.goto(`${BASE}/admin/`, { waitUntil: 'networkidle2' });
@@ -328,10 +388,10 @@ async function runFlows() {
     check('admin: log filter labels were translated',
       /Cancelled/i.test(await page.$eval('#log-type option[value="cancelled"]', (n) => n.textContent)));
     await page.close();
-  }
+  });
 
   // 6. The ARIA tabs pattern the markup claims.
-  {
+  await flow(6, async () => {
     const page = await newPage({ width: 1100 });
     await signIn(page);
     await page.goto(`${BASE}/admin/`, { waitUntil: 'networkidle2' });
@@ -346,10 +406,10 @@ async function runFlows() {
     check('admin: roving tabindex — only the active tab is a stop',
       await page.$eval('#tab-btn-calendar', (n) => n.getAttribute('tabindex') === '-1'));
     await page.close();
-  }
+  });
 
   // 7. Errors say what actually went wrong.
-  {
+  await flow(7, async () => {
     const page = await newPage();
     await signOut(page);
     await page.goto(`${BASE}/admin/`, { waitUntil: 'networkidle2' });
@@ -362,10 +422,10 @@ async function runFlows() {
     check('admin: a wrong password says so, not "something went wrong"',
       /ไม่ถูกต้อง|Incorrect/i.test(text), text);
     await page.close();
-  }
+  });
 
   // 8. The race the backend is architected around, surfaced to the student.
-  {
+  await flow(8, async () => {
     const page = await newPage();
     await page.goto(`${BASE}/b/${SLUG}`, { waitUntil: 'networkidle2' });
     await page.waitForSelector('.calendar-day:not(:disabled)');
@@ -392,11 +452,11 @@ async function runFlows() {
     check('booker: a taken slot explains itself',
       /เพิ่งถูกจอง|just booked/i.test(banner), banner || '(no banner)');
     await page.close();
-  }
+  });
 
   // 9. Settings reset: confirm dialog, then cancel — never actually reset
   // the QA teacher (that would break /b/ployxx for the other flows).
-  {
+  await flow(9, async () => {
     const page = await newPage({ width: 1100 });
     await signIn(page);
     await page.goto(`${BASE}/admin/`, { waitUntil: 'networkidle2' });
@@ -421,10 +481,10 @@ async function runFlows() {
       (await page.$eval('#share-link', (n) => n.value)) === slugBefore);
     check('admin: no console errors on reset-cancel', page.errors.length === 0, page.errors.join(' | '));
     await page.close();
-  }
+  });
 
   // 10. Full settings reset on a throwaway teacher (not the QA teacher).
-  {
+  await flow(10, async () => {
     const uname = `qa_reset_${Date.now()}`;
     const password = 'resetpass1';
     const ownerTok = await sessionCookie('/api/owner/login', { username: OWNER, password: OWNER_PASSWORD, remember: true });
@@ -485,7 +545,181 @@ async function runFlows() {
       /ยังไม่มีช่วงเวลา|No time slots/i.test(tmplText), tmplText.trim());
     check('admin: no console errors on full reset', page.errors.length === 0, page.errors.join(' | '));
     await page.close();
-  }
+
+    // This teacher exists only for this flow. Left behind, the owner list and
+    // the admins table grew by one row on every run. Also sweep up any
+    // qa_reset_* teachers stranded by earlier runs (or a crashed one).
+    const listRes = await fetch(BASE + '/api/owner/admins', { headers: { Cookie: `suvida_session=${ownerTok}` } });
+    const listJson = await listRes.json().catch(() => ({}));
+    const stale = (listJson.admins || []).filter((a) => /^qa_reset_/.test(a.username));
+    let removed = 0;
+    for (const a of stale) {
+      const del = await fetch(`${BASE}/api/owner/admins/${a.id}`, {
+        method: 'DELETE',
+        headers: { Cookie: `suvida_session=${ownerTok}` },
+      });
+      if (del.status === 200) removed++;
+    }
+    check('admin: throwaway reset teacher(s) cleaned up',
+      removed === stale.length && stale.length >= 1,
+      `removed ${removed}/${stale.length}`);
+  });
+
+  // 11. An expired session must return the user to the login form, not leave
+  // them in a UI where every action toasts "Please log in again" with nowhere
+  // to go. There was no 401 handler anywhere before.
+  await flow(11, async () => {
+    const page = await newPage({ width: 1100 });
+    await freshSignIn(page, 'admin');
+    await page.goto(`${BASE}/admin/`, { waitUntil: 'networkidle2' });
+    await page.waitForSelector('#app-section:not(.hidden)', { timeout: 8000 });
+
+    // Revoke the session out from under the open tab, the way an expiry does.
+    await page.evaluate(() => fetch('/api/admin/logout', { method: 'POST' }));
+    await wait(300);
+
+    // Any subsequent action now 401s.
+    await page.click('#tab-btn-schedule');
+    await page.evaluate(() => Api.listTemplate().catch(() => {}));
+    await page.waitForFunction(
+      () => !document.getElementById('login-section').classList.contains('hidden'),
+      { timeout: 8000 }
+    ).then(() => check('admin: an expired session returns the user to the login form', true))
+     .catch(() => check('admin: an expired session returns the user to the login form', false,
+       'still showing the app UI after a 401'));
+    await page.close();
+  });
+
+  // 12. Logout must actually end the session. It used to only hide the DOM:
+  // the cookie is HttpOnly, so clearing it from JS was a no-op and no logout
+  // route existed — a reload was still fully authenticated.
+  await flow(12, async () => {
+    const page = await newPage({ width: 1100 });
+    await freshSignIn(page, 'admin');
+    await page.goto(`${BASE}/admin/`, { waitUntil: 'networkidle2' });
+    await page.waitForSelector('#app-section:not(.hidden)', { timeout: 8000 });
+
+    await page.click('#logout-btn');
+    await page.waitForFunction(
+      () => !document.getElementById('login-section').classList.contains('hidden'),
+      { timeout: 8000 }
+    );
+    check('admin: logout shows the login form', true);
+
+    // The real test: reload. Before the fix this landed back in the app.
+    await page.reload({ waitUntil: 'networkidle2' });
+    await wait(600);
+    const stillOut = await page.evaluate(
+      () => !document.getElementById('login-section').classList.contains('hidden')
+    );
+    check('admin: the session is really gone after a reload', stillOut,
+      'reload returned to the authenticated app — the session was not revoked');
+    await page.close();
+  });
+
+  // 13. A double-tapped confirm must run the action once. Because modals
+  // stack, the button staying live across the dialog meant a second tap
+  // opened a SECOND confirm — and accepting both ran the action twice. On
+  // "Reset to default" that regenerated the slug twice, killing the link the
+  // teacher had just copied.
+  await flow(13, async () => {
+    const page = await newPage({ width: 1100 });
+    await signIn(page, 'admin');
+    await page.goto(`${BASE}/admin/`, { waitUntil: 'networkidle2' });
+    await page.click('#tab-btn-settings');
+    await page.waitForSelector('#settings-reset-btn');
+    await wait(500);
+
+    // Two clicks as fast as the harness can deliver them.
+    await page.evaluate(() => {
+      const b = document.getElementById('settings-reset-btn');
+      b.click(); b.click();
+    });
+    await wait(600);
+    const dialogs = await page.$$eval('.modal-overlay:not(.hidden)', (n) => n.length);
+    check('admin: a double-tapped confirm opens exactly one dialog', dialogs === 1, `${dialogs} open`);
+
+    // Dismiss without resetting — this flow must not mutate the QA teacher.
+    await page.keyboard.press('Escape');
+    await wait(300);
+    await page.close();
+  });
+
+  // 14. Escape during an in-flight submit must not close the PARENT modal.
+  // showModal().close was the unbound global, so it popped whatever was on
+  // top: Escape popped the booking modal and the resolving request then
+  // popped the day panel, after which refreshAfterDayAction() painted into a
+  // detached node — the exact bug the modal stack exists to prevent.
+  await flow(14, async () => {
+    const page = await newPage({ width: 1100 });
+    await signIn(page, 'admin');
+    await page.goto(`${BASE}/admin/`, { waitUntil: 'networkidle2' });
+    await wait(600);
+    await page.waitForSelector('.calendar-day:not(:disabled)', { timeout: 8000 });
+
+    // Find a day that actually HAS a booking — only a booked row carries the
+    // edit/move/cancel trio this flow needs. Same search as flow 4.
+    let opened = false;
+    for (const day of await page.$$('.calendar-day:not(:disabled)')) {
+      await day.click();
+      await page.waitForSelector('.modal .list', { timeout: 5000 });
+      await wait(400);
+      if (await page.$('.modal .list-row .btn-destructive')) { opened = true; break; }
+      await page.keyboard.press('Escape');
+      await wait(200);
+    }
+    check('admin: found a day with a booking for the Escape test', opened);
+    if (!opened) { await page.close(); return; }
+
+    const depthBefore = await page.$$eval('.modal-overlay', (n) => n.length);
+
+    // Open a nested modal from inside the day panel, then close it by its own
+    // handle while the parent is parked.
+    const nested = true;
+    if (nested) {
+      await page.evaluate(() => {
+        const row = [...document.querySelectorAll('.modal .list-row')]
+          .find((r) => r.querySelector('.btn-destructive'));
+        row.querySelector('.list-row__actions .btn').click();
+      });
+      await page.waitForSelector('#bk-name', { timeout: 5000 });
+      await wait(300);
+      const depthNested = await page.$$eval('.modal-overlay', (n) => n.length);
+      check('admin: the nested modal stacks on top of the day panel', depthNested === depthBefore + 1,
+        `${depthBefore} -> ${depthNested}`);
+
+      await page.keyboard.press('Escape');
+      await wait(500);
+      const depthAfter = await page.$$eval('.modal-overlay', (n) => n.length);
+      check('admin: Escape closes only the nested modal, leaving the day panel',
+        depthAfter === depthBefore, `${depthNested} -> ${depthAfter} (want ${depthBefore})`);
+      const panelLive = await page.evaluate(
+        () => !!document.querySelector('.modal-overlay:not(.hidden) .list')
+      );
+      check('admin: the day panel is on top and still rendered', panelLive);
+    }
+    await page.close();
+  });
+
+  // 15. A name containing "$&" or "$'" must survive interpolation. I18N.t
+  // used String.replace with a string replacement, which interprets those as
+  // match references — so a location titled "$'" made the delete confirmation
+  // drop the very name it exists to show.
+  await flow(15, async () => {
+    const page = await newPage({ width: 1100 });
+    await page.goto(`${BASE}/b/${SLUG}`, { waitUntil: 'networkidle2' });
+    await page.waitForFunction(() => typeof I18N !== 'undefined', { timeout: 8000 });
+    const results = await page.evaluate(() => {
+      const probe = (name) => I18N.t('day_panel_booking_cancel_confirm', { name });
+      return ['$&', "$'", '$`', '$1', 'Ploy'].map((n) => ({ input: n, out: probe(n) }));
+    });
+    for (const r of results) {
+      check(`booker: I18N.t preserves a name containing ${JSON.stringify(r.input)}`,
+        r.out.includes(r.input), `rendered: ${r.out}`);
+    }
+    await page.close();
+  });
+
 }
 
 // ── a11y: contrast, names, labels, heading order ────────────
@@ -547,8 +781,13 @@ const A11Y_PROBE = () => {
   };
 };
 
+// Guarded per page: signIn() throws when OWNER_PASSWORD doesn't match the
+// seeded owner, and that single throw used to abort the whole a11y suite and
+// discard the tally with it.
 async function auditPage(name, path, prep, width = 375) {
-  const page = await newPage({ width });
+  let page;
+  try {
+  page = await newPage({ width });
   if (path.startsWith('/admin')) await signIn(page, 'admin');
   if (path.startsWith('/owner')) await signIn(page, 'owner');
   await page.goto(BASE + path, { waitUntil: 'networkidle2' });
@@ -570,8 +809,11 @@ async function auditPage(name, path, prep, width = 375) {
   check(`${name}: heading order is h1-first with no skipped levels`,
     r.headings.length > 0 && r.headings[0] === 1 && skips.length === 0,
     r.headings.map((h) => `h${h}`).join(' > '));
-
-  await page.close();
+  } catch (e) {
+    check(`${name}: audit completed without throwing`, false, e.message);
+  } finally {
+    await page?.close().catch(() => {});
+  }
 }
 
 async function runA11y() {
@@ -708,13 +950,39 @@ const suites = requested.includes('all')
   ? ['flows', 'a11y', 'shots']
   : (requested.length ? requested : ['flows', 'a11y']);
 
+// Preflight. Without this, a missing server or a missing QA dataset surfaced
+// as an opaque waitForSelector timeout several minutes in.
+{
+  let res;
+  try {
+    res = await fetch(`${BASE}/api/public/page?slug=${SLUG}&month=${new Date().toISOString().slice(0, 7)}`);
+  } catch {
+    console.error(`uiqa: no server at ${BASE}. Start one with:  npm run dev`);
+    await browser.close();
+    process.exit(1);
+  }
+  if (!res.ok) {
+    console.error(`uiqa: teacher slug "${SLUG}" not found at ${BASE} (HTTP ${res.status}).`);
+    console.error('uiqa: seed the QA dataset with:  npm run seed:qa');
+    console.error('uiqa: or pass the right slug:    QA_SLUG=<slug> npm run qa');
+    await browser.close();
+    process.exit(1);
+  }
+}
+
 try {
   if (suites.includes('flows')) await runFlows();
   if (suites.includes('a11y')) await runA11y();
   if (suites.includes('shots')) await runShots();
+} catch (e) {
+  // Last-resort net. The tally and the exit code must survive any throw —
+  // previously a suite-level error skipped both and the run reported nothing.
+  check('uiqa: suite completed without throwing', false, e.stack?.split('\n')[0] || e.message);
 } finally {
   await browser.close();
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+// exitCode rather than process.exit() so buffered stdout is flushed first —
+// same reason scripts/smoke.js uses it.
+process.exitCode = fail ? 1 : 0;

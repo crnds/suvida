@@ -13,13 +13,14 @@ The full spec lives in two files at the project root — **read them before maki
 - **`plan.md`** — the implementation plan: confirmed stack decisions, directory layout, full DB schema + triggers, every key flow (booking, cancellation, overlap guard, rate limiting) with the exact SQL, the verification/smoke-test checklist, and a revision log explaining *why* each non-obvious decision was made. Read the "Revision notes" sections before changing anything that looks over-engineered — most of it fixes a specific bug found in an earlier revision.
 - **`DESIGN.md`** — the TypeGallery design system (typography-forward, flat, 0px radius, no shadows) this project's CSS tokens are adapted from. Typography is substituted for Thai coverage (Noto Serif Thai / Noto Sans Thai) — see *i18n & design* in `plan.md`.
 
-**All 10 implementation phases in `plan.md` are done** — backend API, the full front-end (`public/b`, `public/admin`, `public/owner`, `public/shared`), `scripts/smoke.js` (all 21 verification cases), and `README.md` (Turso setup, env vars, deploy steps). This is a working, deployed app, not a scaffold — read `plan.md`'s "Revision notes" before changing anything that looks over-engineered, and re-run `npm run smoke` after any change to `api/`.
+**All 10 implementation phases in `plan.md` are done** — backend API, the full front-end (`public/b`, `public/admin`, `public/owner`, `public/shared`), `scripts/smoke.js` (30 verification groups), and `README.md` (Turso setup, env vars, deploy steps). This is a working, deployed app, not a scaffold — read `plan.md`'s "Revision notes" before changing anything that looks over-engineered, and re-run `npm run smoke` after any change to `api/`.
 
 ## Non-obvious constraints worth internalizing
 
 - **Three serverless functions total, not one per endpoint.** Vercel Hobby caps a deployment at 12 functions. Every route lives behind `api/owner/[...route].js`, `api/admin/[...route].js`, or `api/public/[...route].js`, each dispatching to plain (non-function) modules in `api/_routes/`. Adding a new top-level `.js` file directly under `api/` (outside `_lib`/`_routes`) breaks this — don't. `scripts/smoke.js`'s test 20 asserts the count via a real `vercel build`; SMOKE_SKIP_BUILD=1 skips it for quick iteration.
 - **Timezone is fixed `Asia/Bangkok` (+7h), no DST, no `Intl`.** All times stored as UNIX seconds; conversion is plain integer arithmetic.
-- **Race safety depends on single-statement writes.** Every write that must be atomic (booking, cancel, admin move) is one conditional `INSERT ... SELECT` / `UPDATE ... WHERE`, never a read-then-write pair — Turso's HTTP protocol has no transaction to wrap around two statements, and SQLite's single-writer lock is what actually makes the guard race-safe.
+- **Race safety depends on single-statement writes.** Every write that must be atomic (booking, cancel, admin move) is one conditional `INSERT ... SELECT` / `UPDATE ... WHERE`, never a read-then-write pair — SQLite's single-writer execution of the whole statement is what actually makes the guard race-safe (`plan.md` rev-4 note 4; smoke test 17 is the only thing that catches a regression here). The overlap clause itself lives in `api/_lib/overlap.js`, but it is a *string fragment* spliced into one statement per call site — never turn it into a separate query.
+  *Nuance:* `db.batch(..., 'write')` **is** transactional, because `api/_lib/db.js` routes it through `client.migrate()` (see the FK note below). That is what makes `deleteAdmin`'s 8-statement cascade and `resetSettings`' 5-statement reset safe. So a legitimately batchable write does not need contorting into one statement — the single-statement rule binds the *guards*, where the guard and its write must not be split.
 - **Foreign keys are declared but not enforced** (`PRAGMA foreign_keys` doesn't hold over Turso's HTTP protocol). Any query needing a booking's lesson time must filter `cancelled_at IS NULL` or tolerate a `LEFT JOIN` returning `NULL`.
 - **`booking_events` is written by SQL triggers, not application code**, and is append-only — it's what powers both the admin notifications badge and the booking log.
 - **Frontend follows `~/CLAUDE.md`'s general JS/CSS conventions** (plain `<script>` tags, no modules, a `STATE` object, namespaced localStorage keys) layered under this project's own typography/palette substitutions from `plan.md`'s "i18n & design" section — `~/CLAUDE.md`'s dark-mode-first token set and generic component styling do *not* apply; `public/shared/theme.css` is the actual source of truth.
@@ -53,6 +54,15 @@ The full spec lives in two files at the project root — **read them before maki
 - **`.hidden` (`display: none !important`) is the only show/hide mechanism**, and
   selected state is styled from ARIA attributes (`[aria-selected]`,
   `[aria-pressed]`), never from a class.
+- **New shared modules, added in the refactor pass — use them rather than
+  re-deriving:** `api/_lib/validate.js` (id / text / phone-shape guards),
+  `api/_lib/respond.js` (`badRequest`, `rateLimited`, `conflictOrMissing`),
+  `api/_lib/slug.js`, `api/_lib/overlap.js`, `api/_lib/handler.js`
+  (`withErrorBoundary`, `noStore` — every entry point is wrapped), and
+  `public/shared/validate.js`. `api/_lib/time.js` also now owns `nowUnix()`,
+  `bangkokMonthBounds()` and the calendar-date validators: validate a date
+  with `isValidDateString` / `isValidMonthString`, never a bare shape regex —
+  `Date.UTC` rolls impossible dates over instead of rejecting them.
 - **`scripts/smoke.js` is API-only** — a green smoke run says nothing about the
   UI. **`scripts/uiqa.js` is the front-end's suite**: `npm run qa` drives the
   real journeys in headless Chrome and asserts behaviour, contrast, accessible
@@ -87,7 +97,10 @@ and you must change `scripts/devserver.js` too, and neither it nor
 `vercel build` (smoke test 20) does. Use `vercel dev` before deploying anything
 routing-related. See `README.md` for the full workflow.
 
-**Known mismatch:** `PATCH /api/admin/slug` accepts `[a-z0-9-]{3,32}`, but the
-public booking routes and `public/b/page.js` gate on `^[a-z]{6}$` — a custom
-slug with a digit, a hyphen, or any other length silently breaks that teacher's
-booking page. Pre-existing; see README §5.
+**Resolved:** the slug mismatch (admin accepting `[a-z0-9-]{3,32}` while the
+public routes required `^[a-z]{6}$`, silently breaking the teacher's booking
+page) is fixed. There is now one definition in **`api/_lib/slug.js`**, mirrored
+for the client in **`public/shared/validate.js`**; both sides accept
+`[a-z0-9-]{3,32}`, and `PATCH /slug` additionally refuses reserved words
+(`api`, `admin`, `owner`, `b`, `index`, …) and letter-free slugs. Smoke test 27
+walks a custom slug end to end. **Keep those two files in step.**

@@ -1,4 +1,5 @@
 import { getDb } from '../../_lib/db.js';
+import { badRequest } from '../../_lib/respond.js';
 import { bangkokDateString } from '../../_lib/time.js';
 
 const LIST_LIMIT = 50;
@@ -56,14 +57,26 @@ export async function getNotifications(req, res) {
 // §8). One statement, no read-then-write.
 export async function markSeen(req, res) {
   const upTo = Number((req.body ?? {}).up_to_event_id);
-  if (!Number.isInteger(upTo)) {
-    res.status(400).json({ error: 'invalid_request' });
+  // Number.isInteger(1e20) is true, and there was no upper bound and no check
+  // that the event exists or belongs to this admin. Because the MAX() above
+  // is deliberately monotonic, a single `{"up_to_event_id": 9e15}` was
+  // IRREVERSIBLE through the API: nothing could ever be unread again and the
+  // teacher silently stopped seeing student bookings and cancellations.
+  if (!Number.isSafeInteger(upTo) || upTo < 0) {
+    badRequest(res);
     return;
   }
   const db = getDb();
   await db.execute({
-    sql: 'UPDATE admins SET notifications_seen_event_id = MAX(notifications_seen_event_id, ?) WHERE id = ?',
-    args: [upTo, req.adminId],
+    // Clamped to this admin's own highest event id, so the watermark can
+    // never run ahead of events that actually exist for them.
+    sql: `UPDATE admins
+             SET notifications_seen_event_id = MAX(
+                   notifications_seen_event_id,
+                   MIN(?, COALESCE((SELECT MAX(id) FROM booking_events WHERE admin_id = ?), 0))
+                 )
+           WHERE id = ?`,
+    args: [upTo, req.adminId, req.adminId],
   });
   res.status(200).json({ ok: true });
 }

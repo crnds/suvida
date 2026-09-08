@@ -190,6 +190,22 @@ booking_events   (id INTEGER PRIMARY KEY, admin_id, booking_id,
 rate_limits      (key TEXT PRIMARY KEY, count INT, window_start INT)
 ```
 
+> **This schema block predates two shipped features and is no longer complete.**
+> `scripts/migrate.js` is the source of truth. Missing here:
+>
+> - **`locations`** `(id, admin_id, title, created_at)` plus
+>   `ix_locations_admin`, and the **`location_id` column on both `templates`
+>   and `slots`** (added by `ensureLocationColumns` + `backfillDefaultLocations`,
+>   which are PRAGMA-guarded because SQLite has no
+>   `ADD COLUMN IF NOT EXISTS`). Multiple locations per teacher shipped after
+>   revision 5 was written.
+> - **`POST /api/admin/settings/reset`** (see `reset-button.md`), which clears
+>   the template, collapses to a single default location and rotates the slug,
+>   while deliberately keeping existing slots and their bookings.
+>
+> Anything driven off the block above alone would silently drop the locations
+> feature.
+
 Indexes:
 
 ```sql

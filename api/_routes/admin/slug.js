@@ -1,22 +1,10 @@
-import { randomBytes } from 'node:crypto';
 import { getDb } from '../../_lib/db.js';
-
-const SLUG_ALPHABET = 'abcdefghijklmnopqrstuvwxyz';
-const RANDOM_SLUG_LENGTH = 6;
-const SLUG_GEN_ATTEMPTS = 5;
-const CUSTOM_SLUG_RE = /^[a-z0-9-]{3,32}$/;
-
-function randomSlug() {
-  const bytes = randomBytes(RANDOM_SLUG_LENGTH);
-  let slug = '';
-  for (let i = 0; i < RANDOM_SLUG_LENGTH; i++) slug += SLUG_ALPHABET[bytes[i] % SLUG_ALPHABET.length];
-  return slug;
-}
+import { randomSlug, isAssignableSlug, SLUG_GEN_ATTEMPTS } from '../../_lib/slug.js';
 
 // Single conditional UPDATE, not a read-then-write uniqueness check: the
 // NOT EXISTS guard turns a would-be UNIQUE-constraint throw into a clean
 // "0 rows affected" the caller can treat as a 409.
-async function applySlug(db, adminId, slug) {
+export async function applySlug(db, adminId, slug) {
   const result = await db.execute({
     sql: `UPDATE admins SET slug = ?
            WHERE id = ? AND NOT EXISTS (SELECT 1 FROM admins WHERE slug = ? AND id <> ?)`,
@@ -30,7 +18,10 @@ async function applySlug(db, adminId, slug) {
 // consequence before calling this.
 export async function setSlug(req, res) {
   const { slug } = req.body ?? {};
-  if (typeof slug !== 'string' || !CUSTOM_SLUG_RE.test(slug)) {
+  // isAssignableSlug is the same shape check the public routes now use, plus
+  // a reserved-word list and a "must contain a letter" rule — so `admin`,
+  // `api`, `---` and `123` can't be minted into a share link.
+  if (!isAssignableSlug(slug)) {
     res.status(400).json({ error: 'invalid_slug' });
     return;
   }

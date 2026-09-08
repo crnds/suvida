@@ -104,7 +104,15 @@ function createMonthCalendar(container, handlers) {
       btn.classList.add(`calendar-day--${cell.state || 'closed'}`);
       if (isToday) btn.classList.add('calendar-day--today');
       if (isPast) btn.classList.add('calendar-day--past');
-      if (dateStr === selectedDate) btn.classList.add('is-selected');
+      // aria-current is the source of truth for selection, per the project's
+      // "selected state comes from ARIA attributes, never a class" rule. The
+      // class stayed the only signal here, so the open day was styled but
+      // never conveyed to assistive tech — while theme.css already shipped a
+      // [aria-current="true"] rule that nothing ever triggered.
+      if (dateStr === selectedDate) {
+        btn.classList.add('is-selected');
+        btn.setAttribute('aria-current', 'true');
+      }
 
       btn.appendChild(UI.el('div', { class: 'calendar-day__num', text: String(day) }));
       if (cell.node) btn.appendChild(cell.node);
@@ -132,7 +140,10 @@ function createMonthCalendar(container, handlers) {
   function setSelected(dateStr) {
     selectedDate = dateStr || null;
     container.querySelectorAll('.calendar-day').forEach((btn) => {
-      btn.classList.toggle('is-selected', btn.dataset.date === selectedDate);
+      const isSelected = btn.dataset.date === selectedDate;
+      btn.classList.toggle('is-selected', isSelected);
+      if (isSelected) btn.setAttribute('aria-current', 'true');
+      else btn.removeAttribute('aria-current');
     });
   }
 

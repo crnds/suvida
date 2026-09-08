@@ -50,6 +50,7 @@ const UI = (() => {
   // There was no live region anywhere in the app, so every async change —
   // loading, errors, validation, the unread badge — was silent.
   let liveRegion = null;
+  let announceTimer = null;
   function announce(message, assertive) {
     if (!liveRegion) {
       liveRegion = el('div', {
@@ -59,27 +60,49 @@ const UI = (() => {
       document.body.appendChild(liveRegion);
     }
     liveRegion.setAttribute('aria-live', assertive ? 'assertive' : 'polite');
-    // Same-text updates are not re-announced; clear first.
+    // Same-text updates are not re-announced, so the region is cleared first.
+    // The pending timer is tracked because a second announce() inside the
+    // 30 ms window used to clear the first before it was ever set, silently
+    // dropping it.
     liveRegion.textContent = '';
-    window.setTimeout(() => { liveRegion.textContent = message; }, 30);
+    if (announceTimer) window.clearTimeout(announceTimer);
+    announceTimer = window.setTimeout(() => {
+      liveRegion.textContent = message;
+      announceTimer = null;
+    }, 30);
   }
 
   // ── error messages ──────────────────────────────────────
   // The API returns slot_unavailable, cannot_cancel and invalid_credentials
   // and none of them used to be handled anywhere, so a wrong password and a
   // taken slot both surfaced as "something went wrong".
+  // Kept in sync with the codes api/ actually emits. It had drifted both
+  // ways: `in_past` (adding a slot at a time that has already passed) and
+  // `invalid_date` had no mapping and fell through to "Something went wrong",
+  // while `slot_taken` was mapped but never emitted by anything.
   const ERROR_KEYS = {
     invalid_request: 'error_invalid_request',
     unauthorized: 'error_unauthorized',
     not_found: 'error_not_found',
     rate_limited: 'error_rate_limited',
     slot_unavailable: 'error_slot_unavailable',
-    slot_taken: 'error_slot_unavailable',
+    slot_exists: 'error_slot_exists',
+    move_unavailable: 'error_move_unavailable',
+    booking_cancelled: 'error_booking_cancelled',
+    in_past: 'error_in_past',
+    invalid_date: 'error_invalid_date',
     cannot_cancel: 'error_cannot_cancel',
     invalid_credentials: 'error_invalid_credentials',
     invalid_location: 'error_invalid_location',
     location_in_use: 'error_location_in_use',
+    entry_exists: 'error_entry_exists',
+    slot_booked: 'error_slot_booked',
     slug_taken: 'error_slug_taken',
+    invalid_slug: 'error_invalid_slug',
+    username_taken: 'error_username_taken',
+    slug_generation_failed: 'common_error_generic',
+    method_not_allowed: 'common_error_generic',
+    server_error: 'common_error_generic',
     network_error: 'common_error_network',
   };
 
@@ -109,6 +132,12 @@ const UI = (() => {
   function showBanner(container, text, kind) {
     if (!container) return null;
     clearBanner(container);
+    // setLoading() fills the container with a loading row and doneLoading()
+    // only drops the aria-busy attribute — it never removes that row. So a
+    // failed fetch prepended its error banner ON TOP of a spinner that then
+    // span forever. Clearing it here fixes every setLoading/showError pair at
+    // once (schedule, weeks, locations, log, admins).
+    container.querySelectorAll(':scope > .loading-row').forEach((n) => n.remove());
     const node = banner(text, kind);
     node.dataset.uiBanner = '1';
     container.prepend(node);
@@ -118,6 +147,27 @@ const UI = (() => {
 
   function clearBanner(container) {
     container?.querySelectorAll(':scope > [data-ui-banner]').forEach((n) => n.remove());
+  }
+
+  // ── field-level messages ────────────────────────────────
+  // Three drifted copies of this existed: admin/app.js and owner/app.js had
+  // byte-identical `setFieldMessage(node, message)` helpers, while b/page.js
+  // had a third named `setFieldError` that ALSO managed aria-invalid and
+  // returned a pass/fail boolean. admin/app.js additionally open-coded the
+  // same four lines twice more, 1000 lines apart, while its own helper sat
+  // in the same file. The booker's version is the correct superset, so that
+  // is what lives here.
+  //
+  // `input` is optional — pass it to get aria-invalid maintained too.
+  // Returns true when the field is OK, so callers can `&&` the results.
+  function setFieldError(errorEl, input, message) {
+    const bad = !!message;
+    if (input) input.setAttribute('aria-invalid', String(bad));
+    if (!errorEl) return !bad;
+    errorEl.replaceChildren();
+    errorEl.classList.toggle('hidden', !bad);
+    if (bad) errorEl.append(icon('circle-exclamation'), el('span', { text: message }));
+    return !bad;
   }
 
   // ── loading & empty ─────────────────────────────────────
@@ -185,6 +235,28 @@ const UI = (() => {
     try { return await fn(); } finally { busy(btn, false); }
   }
 
+  // confirm-then-act, with the button disabled across BOTH halves.
+  //
+  // Every call site used to be `if (!await UI.confirm(…)) return;` followed by
+  // withBusy() — leaving the button live while the dialog was open. Since
+  // showModal stacks, a double-tap opened a *second* confirm on top of the
+  // first, and confirming both ran the action twice. On "Reset to default"
+  // that meant two resets and two slug regenerations, so the share link the
+  // teacher had just copied was already dead; on "Save link" it meant two
+  // PATCHes, the second returning 409 "already taken" for a link they had
+  // just successfully set.
+  async function confirmThen(btn, confirmOpts, fn) {
+    if (btn?.disabled) return undefined;
+    busy(btn, true);
+    try {
+      const ok = await confirmDialog(confirmOpts);
+      if (!ok) return undefined;
+      return await fn();
+    } finally {
+      busy(btn, false);
+    }
+  }
+
   // ── list rows ───────────────────────────────────────────
   // Six hand-rolled variants of this existed across the three apps, which is
   // why one of them set flexDirection/alignItems/gap imperatively from JS.
@@ -239,11 +311,23 @@ const UI = (() => {
     if (!items.length) return;
     const first = items[0];
     const last = items[items.length - 1];
+    const active = document.activeElement;
+    // Trap on containment, not identity. Testing only `active === first/last`
+    // let focus escape whenever the modal re-rendered under the focused node:
+    // the day panel's own actions call replaceChildren(), which destroys the
+    // focused button and leaves activeElement as <body> — neither first nor
+    // last — so the next Tab walked straight into the page behind an overlay
+    // that is neither inert nor aria-hidden.
+    if (!active || !top.overlay.contains(active)) {
+      e.preventDefault();
+      (e.shiftKey ? last : first).focus();
+      return;
+    }
     // Wrap, so Tab can never reach the page behind the overlay.
-    if (e.shiftKey && document.activeElement === first) {
+    if (e.shiftKey && active === first) {
       e.preventDefault();
       last.focus();
-    } else if (!e.shiftKey && document.activeElement === last) {
+    } else if (!e.shiftKey && active === last) {
       e.preventDefault();
       first.focus();
     }
@@ -318,21 +402,42 @@ const UI = (() => {
       document.body.classList.add('is-modal-open');
     }
 
-    // Focus the first real control, falling back to the dialog itself.
-    const target = body.querySelector(FOCUSABLE) || closeBtn;
+    // Prefer the first real form control over the Back affordance. The back
+    // button is the body's first child, so it was always the first FOCUSABLE:
+    // a student opening the booking form heard "Pick a different time,
+    // button", and a reflexive Enter threw away the slot they had just
+    // chosen. Back is still reachable by Tab, and remains the fallback when
+    // there is no field to focus.
+    const target =
+      body.querySelector('input:not(:disabled), select:not(:disabled), textarea:not(:disabled)') ||
+      body.querySelector(FOCUSABLE) ||
+      closeBtn;
     window.setTimeout(() => target.focus({ preventScroll: true }), 0);
 
     return {
       body,
-      close: closeModal,
+      // Bound to THIS entry — see closeModal's note.
+      close: () => closeModal(entry),
       setTitle(text) { title.textContent = text; },
       isOpen() { return stack.includes(entry); },
     };
   }
 
-  function closeModal() {
-    const entry = stack.pop();
-    if (!entry) return;
+  // `target` closes that specific modal wherever it sits in the stack;
+  // omitting it closes the top one (Escape, the X, the overlay click).
+  //
+  // showModal() used to hand back the bare `closeModal` as its `close`, so a
+  // handler holding a reference to *its* modal actually popped whatever was
+  // on top. Pressing Escape while a submit was in flight popped the booking
+  // modal, and the request's own closeModal() then popped the day panel
+  // underneath it — after which refreshAfterDayAction() painted into a
+  // detached node. That is exactly the bug the stack was introduced to fix,
+  // reached through an unbound close.
+  function closeModal(target) {
+    const index = target ? stack.lastIndexOf(target) : stack.length - 1;
+    if (index === -1) return; // already closed
+    const entry = stack[index];
+    stack.splice(index, 1);
     entry.overlay.remove();
     const parent = stack[stack.length - 1];
     if (parent) parent.overlay.classList.remove('hidden');
@@ -340,8 +445,31 @@ const UI = (() => {
       document.removeEventListener('keydown', onKeydown, true);
       document.body.classList.remove('is-modal-open');
     }
-    entry.returnFocus?.focus?.({ preventScroll: true });
+    // Only pull focus back if it is still inside the modal being closed —
+    // otherwise a modal closing in the background steals focus from wherever
+    // the user actually is.
+    if (!document.activeElement || entry.overlay.contains(document.activeElement) || document.activeElement === document.body) {
+      restoreFocus(entry);
+    }
     entry.onClose?.();
+  }
+
+  // returnFocus is captured at open time, and the node is often destroyed by
+  // the re-render that the modal's own action triggers (deleting a location
+  // re-renders the whole list, taking its trash button with it). Falling back
+  // to the closest surviving landmark keeps the user near where they were
+  // instead of dumping them at the top of the document.
+  function restoreFocus(entry) {
+    const node = entry.returnFocus;
+    if (node && node.isConnected && typeof node.focus === 'function') {
+      node.focus({ preventScroll: true });
+      return;
+    }
+    const fallback = document.querySelector('main') || document.body;
+    if (fallback && fallback !== document.body) {
+      if (!fallback.hasAttribute('tabindex')) fallback.setAttribute('tabindex', '-1');
+      fallback.focus({ preventScroll: true });
+    }
   }
 
   function closeAllModals() {
@@ -409,7 +537,13 @@ const UI = (() => {
       icon(glyph),
       el('span', { text: message }),
     ]);
-    toastRegion().appendChild(node);
+    const region = toastRegion();
+    // showBanner already escalates errors to assertive; toastError did not,
+    // so a failed cancel/move/delete — 12 failure paths — might not be spoken
+    // until the user next went idle. The region is polite by default and
+    // raised only for the duration of an error.
+    region.setAttribute('aria-live', kind === 'error' ? 'assertive' : 'polite');
+    region.appendChild(node);
     window.setTimeout(() => {
       node.dataset.leaving = 'true';
       window.setTimeout(() => node.remove(), 250);
@@ -470,9 +604,9 @@ const UI = (() => {
 
   return {
     esc, el, icon, announce,
-    messageForError, banner, showBanner, clearBanner,
+    messageForError, banner, showBanner, clearBanner, setFieldError,
     loadingRow, setLoading, doneLoading, emptyState,
-    button, busy, withBusy, listRow,
+    button, busy, withBusy, confirmThen, listRow,
     showModal, closeModal, closeAllModals, topModalBody,
     confirm: confirmDialog,
     toast, toastError,

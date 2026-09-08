@@ -1,33 +1,19 @@
 import { getDb } from '../../_lib/db.js';
-import { bangkokDateString, bangkokDayBounds, unixFromBangkokDateTime } from '../../_lib/time.js';
-
-const MONTH_RE = /^\d{4}-\d{2}$/;
-const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
-const SLUG_RE = /^[a-z]{6}$/;
-
-function monthBounds(monthStr) {
-  const [y, m] = monthStr.split('-').map(Number);
-  const nextY = m === 12 ? y + 1 : y;
-  const nextM = m === 12 ? 1 : m + 1;
-  return {
-    start: unixFromBangkokDateTime(`${monthStr}-01`, 0, 0),
-    end: unixFromBangkokDateTime(`${nextY}-${String(nextM).padStart(2, '0')}-01`, 0, 0),
-  };
-}
-
+import { badRequest } from '../../_lib/respond.js';
+import {
+  bangkokDateString,
+  bangkokDayBounds,
+  bangkokMonthBounds,
+  isValidDateString,
+  isValidMonthString,
+  nowUnix,
+} from '../../_lib/time.js';
+import { isValidSlug } from '../../_lib/slug.js';
 // Bookable = unblocked, future, and not overlapping an active booking — the
-// exact NOT EXISTS clause public/book's guard runs, so a slot shown here can
-// never be one the booking write would then reject (plan.md Key flows §5).
-const BOOKABLE_PREDICATE = `
-  s.blocked = 0
-  AND s.start_unix > ?
-  AND NOT EXISTS (
-    SELECT 1 FROM bookings b JOIN slots o ON o.id = b.slot_id
-     WHERE b.cancelled_at IS NULL AND o.admin_id = s.admin_id
-       AND o.start_unix < s.start_unix + 3600
-       AND o.start_unix > s.start_unix - 3600
-  )
-`;
+// exact clause public/book's guard runs, so a slot shown here can never be
+// one the booking write would then reject (plan.md Key flows §5).
+import { BOOKABLE_PREDICATE } from '../../_lib/overlap.js';
+import { optionalIdParam, INVALID } from '../../_lib/validate.js';
 
 // Month summary and day detail are two branches of one handler, same split
 // as admin/slots.js's listSlots — but booked/blocked slots never appear in
@@ -35,8 +21,8 @@ const BOOKABLE_PREDICATE = `
 // never offered (plan.md Key flows §5).
 export async function getPage(req, res) {
   const slug = req.query?.slug;
-  if (typeof slug !== 'string' || !SLUG_RE.test(slug)) {
-    res.status(400).json({ error: 'invalid_request' });
+  if (!isValidSlug(slug)) {
+    badRequest(res);
     return;
   }
   const db = getDb();
@@ -49,15 +35,19 @@ export async function getPage(req, res) {
     return;
   }
   const adminId = admin.rows[0].id;
-  const now = Math.floor(Date.now() / 1000);
+  const now = nowUnix();
 
   if (typeof req.query?.day === 'string') {
-    if (!DAY_RE.test(req.query.day)) {
-      res.status(400).json({ error: 'invalid_request' });
+    if (!isValidDateString(req.query.day)) {
+      res.status(400).json({ error: 'invalid_date' });
       return;
     }
     const { start, end } = bangkokDayBounds(req.query.day);
-    const locationId = req.query?.location_id ? Number(req.query.location_id) : null;
+    const locationId = optionalIdParam(req.query?.location_id);
+    if (locationId === INVALID) {
+      badRequest(res);
+      return;
+    }
     const result = await db.execute({
       sql: `SELECT s.id, s.start_unix, s.location_id, l.title AS location_title
               FROM slots s
@@ -73,12 +63,16 @@ export async function getPage(req, res) {
   }
 
   if (typeof req.query?.month === 'string') {
-    if (!MONTH_RE.test(req.query.month)) {
-      res.status(400).json({ error: 'invalid_request' });
+    if (!isValidMonthString(req.query.month)) {
+      res.status(400).json({ error: 'invalid_date' });
       return;
     }
-    const { start, end } = monthBounds(req.query.month);
-    const locationId = req.query?.location_id ? Number(req.query.location_id) : null;
+    const { start, end } = bangkokMonthBounds(req.query.month);
+    const locationId = optionalIdParam(req.query?.location_id);
+    if (locationId === INVALID) {
+      badRequest(res);
+      return;
+    }
     const result = await db.execute({
       sql: `SELECT s.start_unix
               FROM slots s
@@ -100,5 +94,5 @@ export async function getPage(req, res) {
     return;
   }
 
-  res.status(400).json({ error: 'invalid_request' });
+  badRequest(res);
 }

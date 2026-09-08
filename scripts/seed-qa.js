@@ -10,6 +10,8 @@
 //
 // Distinct from seed.js, which creates the platform owner and nothing else.
 // This is throwaway QA data — never point it at a real database.
+import { bangkokDateString, DAY_SECONDS } from '../api/_lib/time.js';
+
 const BASE = process.env.SMOKE_BASE_URL || 'http://localhost:3000';
 const OWNER_USERNAME = process.env.OWNER_USERNAME;
 const OWNER_PASSWORD = process.env.OWNER_PASSWORD;
@@ -158,15 +160,16 @@ console.log('activated the next 6 weeks');
 // legitimately refused (a booking already sits within the hour), which is
 // expected once part of the dataset exists.
 
-function bangkokDateString(offsetDays) {
-  const d = new Date(Date.now() + offsetDays * 86400_000 + 7 * 3600_000);
-  return d.toISOString().slice(0, 10);
-}
+// Bangkok date math comes from api/_lib/time.js — this file used to
+// re-derive it, which is a drift hazard against the one implementation that
+// scripts/time.test.js actually covers.
+const dayOffsetToDateString = (offsetDays) =>
+  bangkokDateString(Math.floor(Date.now() / 1000) + offsetDays * DAY_SECONDS);
 
 let booked = 0;
 let nameIndex = 0;
 for (let dayOffset = 1; dayOffset <= 21 && booked < 14; dayOffset++) {
-  const day = bangkokDateString(dayOffset);
+  const day = dayOffsetToDateString(dayOffset);
   const slots = await api('GET', `/api/admin/slots?day=${day}`);
   if (slots.status !== 200) continue;
   const free = (slots.data.slots || []).filter((s) => !s.booking && !s.blocked);

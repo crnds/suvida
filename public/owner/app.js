@@ -32,11 +32,8 @@ document.addEventListener('i18n:changed', renderAdmins);
 const showModal = (title, body) => UI.showModal({ title, body });
 const closeModal = UI.closeModal;
 
-function setFieldMessage(node, message) {
-  if (!message) { node.classList.add('hidden'); node.replaceChildren(); return; }
-  node.replaceChildren(UI.icon('circle-exclamation'), UI.el('span', { text: message }));
-  node.classList.remove('hidden');
-}
+// See admin/app.js and ui.js: this was a byte-identical third copy.
+const setFieldMessage = (node, message) => UI.setFieldError(node, null, message);
 
 function showLogin() {
   els.loginSection.classList.remove('hidden');
@@ -59,8 +56,10 @@ els.loginForm.addEventListener('submit', async (e) => {
     try {
       await Api.ownerLogin(username, password);
       els.loginPassword.value = '';
-      await loadAdmins();
+      // Login has already succeeded here — showApp() first, then refresh, so
+      // a failure listing admins can never be reported as a bad password.
       showApp();
+      await refreshAdmins();
     } catch (err) {
       setFieldMessage(els.loginError,
         err.status === 429 ? I18N.t('login_rate_limited')
@@ -71,21 +70,43 @@ els.loginForm.addEventListener('submit', async (e) => {
   });
 });
 
-els.logoutBtn.addEventListener('click', () => {
-  document.cookie = 'suvida_session=; Path=/; Max-Age=0';
-  showLogin();
+// See the matching note in admin/app.js: the session cookie is HttpOnly, so
+// clearing it from JavaScript was a no-op and the server had no revocation
+// route at all.
+els.logoutBtn.addEventListener('click', async () => {
+  await UI.withBusy(els.logoutBtn, async () => {
+    try {
+      await Api.ownerLogout();
+    } finally {
+      showLogin();
+    }
+  });
 });
 
-async function loadAdmins() {
+async function loadAdmins(opts) {
   // This page previously rendered nothing at all while fetching, so it sat
   // blank for a whole round trip on first load.
   UI.setLoading(els.adminsList);
   try {
-    const data = await Api.listAdmins();
+    const data = await Api.listAdmins(opts);
     STATE.admins = data.admins || [];
     renderAdmins();
   } finally {
     UI.doneLoading(els.adminsList);
+  }
+}
+
+// Callers that have already succeeded at their own action (login, create,
+// delete) must not have a failure *here* reported as a failure of theirs.
+// Without this, a network blip on the follow-up list refresh made a correct
+// password show "Incorrect username or password" — while actually logged in
+// — and left the list stuck on a spinner. Same for "create failed" and
+// "delete failed" toasts after the write had already succeeded.
+async function refreshAdmins() {
+  try {
+    await loadAdmins();
+  } catch (err) {
+    UI.showBanner(els.adminsList, UI.messageForError(err), 'error');
   }
 }
 
@@ -139,8 +160,8 @@ els.createForm.addEventListener('submit', async (e) => {
     try {
       await Api.createAdmin({ username, password, display_name });
       els.createForm.reset();
-      await loadAdmins();
       UI.toast('success', I18N.t('owner_admin_created', { name: display_name }));
+      await refreshAdmins();
     } catch (err) {
       setFieldMessage(els.createError,
         err.status === 409 ? I18N.t('owner_admin_username_taken') : UI.messageForError(err));
@@ -151,7 +172,7 @@ els.createForm.addEventListener('submit', async (e) => {
 function openEditModal(admin) {
   const nameInput = UI.el('input', {
     class: 'input',
-    attrs: { id: 'edit-display-name', type: 'text', required: true },
+    attrs: { id: 'edit-display-name', type: 'text', required: true, maxlength: String(MAX_TEXT_LENGTH) },
   });
   nameInput.value = admin.display_name;
 
@@ -166,7 +187,7 @@ function openEditModal(admin) {
     attrs: { type: 'submit' },
   }, [UI.icon('check'), UI.el('span', { text: I18N.t('common_save') })]);
 
-  const form = UI.el('form', { class: 'stack-tight', attrs: { id: 'edit-form' } }, [
+  const form = UI.el('form', { class: 'stack-tight', attrs: { id: 'edit-form', novalidate: true } }, [
     UI.el('div', { class: 'field' }, [
       UI.el('label', { text: I18N.t('owner_admin_display_name'), attrs: { for: 'edit-display-name' } }),
       nameInput,
@@ -179,7 +200,9 @@ function openEditModal(admin) {
     submit,
   ]);
 
-  showModal(I18N.t('owner_admin_edit_title', { name: admin.display_name }),
+  // Bound handle, not the global closeModal: closing "the top modal" rather
+  // than *this* one is how a background modal used to get popped instead.
+  const handle = showModal(I18N.t('owner_admin_edit_title', { name: admin.display_name }),
     UI.el('div', { class: 'stack-tight' }, [errorBox, form]));
 
   form.addEventListener('submit', async (e) => {
@@ -193,9 +216,9 @@ function openEditModal(admin) {
     await UI.withBusy(submit, async () => {
       try {
         await Api.updateAdmin(admin.id, payload);
-        closeModal();
-        await loadAdmins();
+        handle.close();
         UI.toast('success', I18N.t('owner_admin_saved'));
+        await refreshAdmins();
       } catch (err) {
         UI.showBanner(errorBox, UI.messageForError(err), 'error');
       }
@@ -204,27 +227,31 @@ function openEditModal(admin) {
 }
 
 async function deleteAdmin(admin, btn) {
-  const ok = await UI.confirm({
+  await UI.confirmThen(btn, {
     title: I18N.t('common_delete'),
     message: I18N.t('owner_admin_delete_confirm', { name: admin.display_name }),
     confirmLabel: I18N.t('common_delete'),
-  });
-  if (!ok) return;
-  await UI.withBusy(btn, async () => {
+  }, async () => {
     try {
       await Api.deleteAdmin(admin.id);
-      await loadAdmins();
       UI.toast('success', I18N.t('owner_admin_deleted'));
     } catch (err) {
       UI.toastError(err);
+      return;
     }
+    await refreshAdmins();
   });
 }
 
 async function init() {
   I18N.apply();
+  Api.onUnauthorized(() => {
+    showLogin();
+    UI.toastError(I18N.t('error_unauthorized'));
+  });
   try {
-    await loadAdmins();
+    // See admin/app.js: a 401 here means "not signed in yet".
+    await loadAdmins({ allowUnauthorized: true });
     showApp();
   } catch (err) {
     showLogin();

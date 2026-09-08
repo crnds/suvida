@@ -44,6 +44,14 @@ function record(name, pass, detail) {
 function assert(name, condition, detail) {
   record(name, !!condition, detail);
 }
+// A skip is NOT a pass. Recording it as one made the tally claim the
+// three-function ceiling was verified on every SMOKE_SKIP_BUILD=1 run —
+// which is every run that can't `vercel login`. Skips are excluded from
+// both sides of the ratio and reported separately.
+function recordSkip(name, reason) {
+  results.push({ name, pass: true, skipped: true, detail: reason });
+  console.log(`SKIP — ${name}${reason ? '  (' + reason + ')' : ''}`);
+}
 async function group(name, fn) {
   console.log(`\n── ${name} ──`);
   try {
@@ -93,6 +101,28 @@ async function run(sql, args = []) {
 
 async function resetRateLimits(likePattern = '%') {
   await run('DELETE FROM rate_limits WHERE key LIKE ?', [likePattern]);
+}
+
+// Every run used to leave behind two-plus throwaway `smoke_*` teachers (with
+// their locations, templates, weeks, slots and bookings) and ~121 synthetic
+// `booking_id = -1` events from test15. Nothing removed them, so test15's
+// keyset walk grew by a page per run until it tripped its own
+// `pages > 20` guard and the suite started failing for the wrong reason.
+// Purging at the START (not the end) also cleans up after a crashed run.
+async function purgePreviousRuns() {
+  const ids = await rows("SELECT id FROM admins WHERE username LIKE 'smoke%'");
+  const adminIds = ids.map((r) => Number(r.id));
+  if (adminIds.length) {
+    const list = adminIds.join(',');
+    // Children first. FK enforcement is off over this driver (see
+    // api/_lib/db.js), so order is for clarity, not correctness.
+    for (const table of ['booking_events', 'bookings', 'slots', 'week_activations', 'templates', 'locations', 'sessions']) {
+      await run(`DELETE FROM ${table} WHERE admin_id IN (${list})`);
+    }
+    await run(`DELETE FROM admins WHERE id IN (${list})`);
+  }
+  await run('DELETE FROM booking_events WHERE booking_id = -1');
+  return { admins: adminIds.length };
 }
 
 function futureUnix(hours) {
@@ -641,7 +671,7 @@ async function test19() {
 
 async function test20() {
   if (SKIP_BUILD) {
-    record('test20: function count = 3 (SKIPPED via SMOKE_SKIP_BUILD=1)', true);
+    recordSkip('test20: function count = 3', 'SMOKE_SKIP_BUILD=1 — ceiling NOT verified');
     return;
   }
   const build = spawnSync('npx', ['vercel', 'build', '--yes'], { cwd: process.cwd(), encoding: 'utf8', env: process.env });
@@ -845,7 +875,261 @@ async function test23() {
 
 // ── main ───────────────────────────────────────────────────────
 
+
+// ── Test 24: session revocation (logout) ───────────────────────
+// Logout used to be a no-op: the cookie is HttpOnly so the client's
+// `document.cookie = '…Max-Age=0'` could not touch it, and no logout route
+// existed at all, so the row lived its full 30 days. "Log out" on a shared
+// device hid the DOM and nothing else.
+
+async function test24() {
+  await resetRateLimits();
+  const admin = await createAdmin(`smoke_logout_${RUN_ID}`, 'Smoke Logout', 'passwordL1');
+
+  const before = await req('GET', '/api/admin/me', { cookie: admin.cookie });
+  assert('test24: session works before logout', before.status === 200, JSON.stringify(before.json));
+
+  const out = await req('POST', '/api/admin/logout', { cookie: admin.cookie });
+  assert('test24: logout returns 200', out.status === 200, JSON.stringify(out.json));
+  assert('test24: logout clears the cookie', /Max-Age=0/.test(out.cookie || '') || (out.cookie || '').includes('suvida_session='),
+    String(out.cookie));
+
+  const after = await req('GET', '/api/admin/me', { cookie: admin.cookie });
+  assert('test24: the SAME cookie is rejected after logout', after.status === 401, JSON.stringify(after.json));
+
+  const gone = await row('SELECT 1 AS x FROM sessions WHERE token = ?', [admin.cookie.split('=')[1]]);
+  assert('test24: the session row is deleted server-side', gone === null, JSON.stringify(gone));
+
+  const again = await req('POST', '/api/admin/logout');
+  assert('test24: logout is idempotent with no cookie', again.status === 200, JSON.stringify(again.json));
+
+  // A password change must not leave older sessions usable.
+  const admin2 = await createAdmin(`smoke_pwd_${RUN_ID}`, 'Smoke Pwd', 'passwordP1');
+  const patch = await req('PATCH', `/api/owner/admins/${admin2.id}`, {
+    cookie: S.ownerCookie, body: { password: 'passwordP2' },
+  });
+  assert('test24: password change succeeds', patch.status === 200, JSON.stringify(patch.json));
+  const stale = await req('GET', '/api/admin/me', { cookie: admin2.cookie });
+  assert('test24: sessions are revoked on password change', stale.status === 401, JSON.stringify(stale.json));
+}
+
+// ── Test 25: phone validation closes the cancel/history bypass ──
+// canonicalizePhone() strips non-digits and never rejects, so 'abc', '+',
+// '{}' and '---' all became ''. public/cancel authenticates on booking_id +
+// booker_phone alone, so one junk-phone booking let anyone cancel any OTHER
+// empty-phone booking by enumerating ids, and public/history leaked their
+// name, time and location.
+
+async function test25() {
+  await resetRateLimits();
+  const admin = S.teacherA;
+
+  for (const phone of ['abc', 'x', '---', '+', '12345678']) {
+    const r = await publicBook(admin.slug, S.slot1, 'Junk Phone', phone);
+    assert(`test25: booking with phone=${JSON.stringify(phone)} is rejected (400)`,
+      r.status === 400, `${r.status} ${JSON.stringify(r.json)}`);
+  }
+  const objPhone = await req('POST', '/api/public/book', {
+    body: { slug: admin.slug, slot_id: S.slot1, name: 'Junk', phone: {} },
+  });
+  assert('test25: booking with a non-string phone is rejected (400)',
+    objPhone.status === 400, JSON.stringify(objPhone.json));
+
+  await resetRateLimits();
+  for (const phone of ['abc', '---']) {
+    const h = await req('POST', '/api/public/history', { body: { slug: admin.slug, phone } });
+    assert(`test25: history with phone=${JSON.stringify(phone)} is rejected (400)`,
+      h.status === 400, JSON.stringify(h.json));
+    const c = await publicCancel(admin.slug, 1, phone);
+    assert(`test25: cancel with phone=${JSON.stringify(phone)} is rejected (400)`,
+      c.status === 400, JSON.stringify(c.json));
+  }
+
+  // No booking may carry an empty phone any more — that is what made the
+  // shared-bucket bypass possible in the first place.
+  const empties = await row("SELECT COUNT(*) AS c FROM bookings WHERE booker_phone = ''");
+  assert('test25: no booking has an empty canonical phone', Number(empties.c) === 0, JSON.stringify(empties));
+
+  // A 500 KB "phone" must not become a 500 KB rate_limits key.
+  await resetRateLimits();
+  const huge = await req('POST', '/api/public/history', { body: { slug: admin.slug, phone: '1'.repeat(500000) } });
+  assert('test25: an oversized phone is rejected (400)', huge.status === 400, String(huge.status));
+  const bigKey = await row('SELECT MAX(LENGTH(key)) AS n FROM rate_limits');
+  assert('test25: no oversized rate_limits key was written', Number(bigKey.n || 0) < 200, JSON.stringify(bigKey));
+
+  // A valid phone still works.
+  await resetRateLimits();
+  const ok = await req('POST', '/api/public/history', { body: { slug: admin.slug, phone: '0810000001' } });
+  assert('test25: a well-formed phone is still accepted (200)', ok.status === 200, JSON.stringify(ok.json));
+}
+
+// ── Test 26: rate limiting is not bypassable via X-Forwarded-For ──
+// Vercel APPENDS the real client IP to a client-supplied X-Forwarded-For
+// rather than replacing it, so taking xff.split(',')[0] handed the caller
+// control of their own bucket — and the 10/min guard is the only
+// brute-force control on either login route.
+
+async function test26() {
+  await resetRateLimits();
+  const LIMIT = 10;
+  let sawLimit = false;
+  for (let i = 0; i < LIMIT + 4; i++) {
+    const res = await fetch(`${BASE_URL}/api/admin/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Forwarded-For': `203.0.113.${i}` },
+      body: JSON.stringify({ username: `nosuch_${RUN_ID}`, password: 'wrongpassword' }),
+    });
+    if (res.status === 429) { sawLimit = true; break; }
+  }
+  assert('test26: a per-request spoofed X-Forwarded-For does NOT mint fresh buckets', sawLimit,
+    sawLimit ? '' : 'never hit 429 in limit+4 attempts — the bucket key is caller-controlled');
+
+  const keys = await rows("SELECT key FROM rate_limits WHERE key LIKE 'admin/login:%'");
+  assert('test26: all attempts landed in ONE bucket', keys.length === 1,
+    JSON.stringify(keys.map((k) => k.key)));
+  await resetRateLimits();
+}
+
+// ── Test 27: a custom slug serves the public page end to end ────
+// PATCH /slug accepted [a-z0-9-]{3,32} while every public route required
+// exactly [a-z]{6}, so `ploy-piano` saved, showed a success toast, handed
+// over a share link — and then 400'd every student request, with nothing
+// naming the slug as the cause. The teacher's whole public presence went
+// offline silently.
+
+async function test27() {
+  await resetRateLimits();
+  const admin = await createAdmin(`smoke_slug_${RUN_ID}`, 'Smoke Slug', 'passwordS1');
+  const custom = `kru-ploy-${RUN_ID % 1000}`;
+
+  const set = await req('PATCH', '/api/admin/slug', { cookie: admin.cookie, body: { slug: custom } });
+  assert('test27: a hyphenated custom slug is accepted (200)', set.status === 200, JSON.stringify(set.json));
+
+  const month = bangkokDateString(futureUnix(24)).slice(0, 7);
+  const page = await req('GET', '/api/public/page', { query: { slug: custom, month } });
+  assert('test27: the public month view resolves that slug (200)', page.status === 200, JSON.stringify(page.json));
+
+  const hist = await req('POST', '/api/public/history', { body: { slug: custom, phone: '0810000002' } });
+  assert('test27: public history resolves that slug (200)', hist.status === 200, JSON.stringify(hist.json));
+
+  // Reserved words and letter-free slugs must not be assignable.
+  for (const bad of ['admin', 'api', 'owner', 'b', 'index', '---', '123', 'ab']) {
+    const r = await req('PATCH', '/api/admin/slug', { cookie: admin.cookie, body: { slug: bad } });
+    assert(`test27: slug ${JSON.stringify(bad)} is rejected (400)`, r.status === 400, `${r.status} ${JSON.stringify(r.json)}`);
+  }
+}
+
+// ── Test 28: impossible dates are rejected, not rolled over ─────
+// The route regexes only checked shape, and Date.UTC rolls over rather than
+// rejecting: ?month=2026-99 silently served March 2034, ?day=2026-02-31
+// served March 3rd, and /weeks/2026-13-45 materialised slots in 2027 while
+// echoing back the CORRECTED date, so the client could not tell.
+
+async function test28() {
+  const admin = S.teacherA;
+  for (const month of ['2026-99', '2026-00', '2026-13', '0026-01', 'zzz']) {
+    const r = await req('GET', '/api/admin/log', { cookie: admin.cookie, query: { month } });
+    assert(`test28: log ?month=${month} is rejected (400)`, r.status === 400, `${r.status} ${JSON.stringify(r.json)}`);
+  }
+  for (const day of ['2026-02-31', '2026-04-31', '0026-01-01', '2026-13-45', 'zzz']) {
+    const r = await req('GET', '/api/admin/slots', { cookie: admin.cookie, query: { day } });
+    assert(`test28: slots ?day=${day} is rejected (400)`, r.status === 400, `${r.status} ${JSON.stringify(r.json)}`);
+  }
+  // Leap years must still be accepted where they are real.
+  const leap = await req('GET', '/api/admin/slots', { cookie: admin.cookie, query: { day: '2028-02-29' } });
+  assert('test28: a real leap day is still accepted (200)', leap.status === 200, JSON.stringify(leap.json));
+
+  const week = await req('POST', '/api/admin/weeks/2026-13-45/activate', { cookie: admin.cookie });
+  assert('test28: activating an impossible week date is rejected (400)', week.status === 400, JSON.stringify(week.json));
+
+  // location_id must be NaN-checked, or the filter is silently dropped and
+  // the caller gets every location while believing it filtered one.
+  const nan = await req('GET', '/api/admin/slots', { cookie: admin.cookie, query: { day: bangkokDateString(futureUnix(24)), location_id: 'abc' } });
+  assert('test28: ?location_id=abc is rejected (400)', nan.status === 400, JSON.stringify(nan.json));
+}
+
+// ── Test 29: notification watermark cannot be poisoned ──────────
+// markSeen checked only Number.isInteger, which is true for 1e20. Because
+// the MAX() is deliberately monotonic, one poisoned write was irreversible
+// through the API and the teacher silently stopped seeing student bookings
+// and cancellations forever.
+
+async function test29() {
+  const admin = S.teacherA;
+  const maxEvent = await row('SELECT COALESCE(MAX(id), 0) AS m FROM booking_events WHERE admin_id = ?', [admin.id]);
+
+  const huge = await req('POST', '/api/admin/notifications/seen', { cookie: admin.cookie, body: { up_to_event_id: 1e20 } });
+  assert('test29: an unsafe integer watermark is rejected (400)', huge.status === 400, JSON.stringify(huge.json));
+
+  const neg = await req('POST', '/api/admin/notifications/seen', { cookie: admin.cookie, body: { up_to_event_id: -5 } });
+  assert('test29: a negative watermark is rejected (400)', neg.status === 400, JSON.stringify(neg.json));
+
+  // A large-but-safe integer is accepted and CLAMPED, which is the real guard.
+  const big = await req('POST', '/api/admin/notifications/seen', { cookie: admin.cookie, body: { up_to_event_id: 9e15 } });
+  assert('test29: a large safe integer is accepted (200)', big.status === 200, JSON.stringify(big.json));
+
+  const seen = await row('SELECT notifications_seen_event_id AS s FROM admins WHERE id = ?', [admin.id]);
+  assert('test29: the watermark is clamped to this admin\'s own highest event id',
+    Number(seen.s) <= Number(maxEvent.m), `seen=${seen.s} max=${maxEvent.m}`);
+}
+
+// ── Test 30: HTTP contract + tenant cascade ─────────────────────
+
+async function test30() {
+  const admin = S.teacherA;
+
+  // Method mismatch is 405 + Allow, not a misleading 404.
+  const wrongMethod = await req('GET', '/api/admin/bookings', { cookie: admin.cookie });
+  assert('test30: a POST-only route answers GET with 405', wrongMethod.status === 405, JSON.stringify(wrongMethod.json));
+
+  // A malformed percent-escape in a path param must not be an uncaught throw.
+  const badEscape = await req('POST', '/api/admin/weeks/%/activate', { cookie: admin.cookie });
+  assert('test30: a malformed percent-escape is a 400, not a 500', badEscape.status === 400,
+    `${badEscape.status} ${JSON.stringify(badEscape.json)}`);
+
+  // Authenticated responses carry per-tenant PII and must not be cached.
+  const me = await fetch(`${BASE_URL}/api/admin/me`, { headers: { Cookie: admin.cookie } });
+  assert('test30: authenticated responses set Cache-Control: no-store',
+    /no-store/.test(me.headers.get('cache-control') || ''), String(me.headers.get('cache-control')));
+
+  // The Phase-1 stub is gone from the public surface.
+  const stub = await req('GET', '/api/public');
+  assert('test30: the leftover public stub route is gone (404)', stub.status === 404, JSON.stringify(stub.json));
+
+  // Role separation: an owner session must not reach admin routes.
+  const crossRole = await req('GET', '/api/admin/me', { cookie: S.ownerCookie });
+  assert('test30: an owner session cannot reach an admin route (401)', crossRole.status === 401, JSON.stringify(crossRole.json));
+
+  // Unbounded/untyped credentials must be a 400, not a 500 from inside scrypt.
+  for (const body of [
+    { username: `smoke_bad_${RUN_ID}`, password: 12345, display_name: 'X' },
+    { username: `smoke_bad_${RUN_ID}`, password: 'p'.repeat(5000), display_name: 'X' },
+    { username: {}, password: 'passwordX1', display_name: 'X' },
+  ]) {
+    const r = await req('POST', '/api/owner/admins', { cookie: S.ownerCookie, body });
+    assert(`test30: malformed credentials are a 400 (${typeof body.password}/${String(body.password).length})`,
+      r.status === 400, `${r.status} ${JSON.stringify(r.json)}`);
+  }
+
+  // deleteAdmin must cascade locations — it never did, so every deleted
+  // teacher leaked their location rows permanently.
+  const doomed = await createAdmin(`smoke_del_${RUN_ID}`, 'Smoke Delete', 'passwordD1');
+  await req('POST', '/api/admin/locations', { cookie: doomed.cookie, body: { title: 'Doomed Room' } });
+  const before = await rows('SELECT id FROM locations WHERE admin_id = ?', [doomed.id]);
+  assert('test30: the doomed teacher has locations before deletion', before.length >= 1, String(before.length));
+
+  const del = await req('DELETE', `/api/owner/admins/${doomed.id}`, { cookie: S.ownerCookie });
+  assert('test30: deleteAdmin returns 200', del.status === 200, JSON.stringify(del.json));
+  const orphans = await rows('SELECT id FROM locations WHERE admin_id = ?', [doomed.id]);
+  assert('test30: deleting a teacher leaves no orphaned locations', orphans.length === 0,
+    `${orphans.length} orphaned`);
+  const sessionsGone = await rows('SELECT token FROM sessions WHERE admin_id = ?', [doomed.id]);
+  assert('test30: deleting a teacher revokes their sessions', sessionsGone.length === 0, String(sessionsGone.length));
+}
+
 async function main() {
+  const purged = await purgePreviousRuns();
+  if (purged.admins > 0) console.log(`(purged ${purged.admins} leftover smoke_* teacher(s) from previous runs)`);
   await group('Test 1 — migrate/seed idempotency', test1);
   await group('Test 2 — owner->admin->template->activate', test2);
   await group('Tests 3&4 — double-book 409, cancel+rebook 201', test3and4);
@@ -868,9 +1152,22 @@ async function main() {
   await group('Test 21 — rate-limit window reset', test21);
   await group('Test 22 — locations', test22);
   await group('Test 23 — settings reset', test23);
+  await group('Test 24 — logout revokes the session', test24);
+  await group('Test 25 — phone validation', test25);
+  await group('Test 26 — X-Forwarded-For rate-limit bypass', test26);
+  await group('Test 27 — custom slug end to end', test27);
+  await group('Test 28 — impossible dates rejected', test28);
+  await group('Test 29 — notification watermark clamp', test29);
+  await group('Test 30 — HTTP contract + tenant cascade', test30);
 
-  const failed = results.filter((r) => !r.pass);
-  console.log(`\n${results.length - failed.length}/${results.length} assertions passed.`);
+  const skipped = results.filter((r) => r.skipped);
+  const graded = results.filter((r) => !r.skipped);
+  const failed = graded.filter((r) => !r.pass);
+  console.log(`\n${graded.length - failed.length}/${graded.length} assertions passed.`);
+  if (skipped.length > 0) {
+    console.log(`${skipped.length} skipped (NOT verified):`);
+    for (const s of skipped) console.log(`  - ${s.name}${s.detail ? ' :: ' + s.detail : ''}`);
+  }
   if (failed.length > 0) {
     console.log('\nFailed assertions:');
     for (const f of failed) console.log(`  - ${f.name}${f.detail ? ' :: ' + f.detail : ''}`);
@@ -878,7 +1175,14 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error('smoke test crashed:', err);
-  process.exitCode = 1;
-});
+main()
+  .catch((err) => {
+    console.error('smoke test crashed:', err);
+    process.exitCode = 1;
+  })
+  // The libsql handle was never released, so the process relied on the event
+  // loop draining on its own. migrate.js and seed.js both close; this now
+  // matches them.
+  .finally(() => {
+    try { db.close(); } catch { /* already closed */ }
+  });

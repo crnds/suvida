@@ -1,4 +1,6 @@
 import { getDb } from '../../_lib/db.js';
+import { badRequest } from '../../_lib/respond.js';
+import { isId } from '../../_lib/validate.js';
 
 const MAX_START_MINUTES = 24 * 60 - 1;
 
@@ -24,8 +26,8 @@ export async function listTemplate(req, res) {
 export async function addTemplateEntry(req, res) {
   const { weekday, start_minutes, location_id } = req.body ?? {};
   const locationId = Number(location_id);
-  if (!isValidWeekday(weekday) || !isValidStartMinutes(start_minutes) || !Number.isInteger(locationId)) {
-    res.status(400).json({ error: 'invalid_request' });
+  if (!isValidWeekday(weekday) || !isValidStartMinutes(start_minutes) || !isId(locationId)) {
+    badRequest(res);
     return;
   }
   const db = getDb();
@@ -54,8 +56,8 @@ export async function addTemplateEntry(req, res) {
 // template edits do not retro-apply (plan.md Key flows §1).
 export async function removeTemplateEntry(req, res, params) {
   const id = Number(params.id);
-  if (!Number.isInteger(id)) {
-    res.status(400).json({ error: 'invalid_request' });
+  if (!isId(id)) {
+    badRequest(res);
     return;
   }
   const db = getDb();

@@ -1,17 +1,8 @@
-import { randomBytes } from 'node:crypto';
 import { getDb } from '../../_lib/db.js';
+import { nowUnix } from '../../_lib/time.js';
+import { randomSlug, SLUG_GEN_ATTEMPTS } from '../../_lib/slug.js';
 
-const SLUG_ALPHABET = 'abcdefghijklmnopqrstuvwxyz';
-const RANDOM_SLUG_LENGTH = 6;
-const SLUG_GEN_ATTEMPTS = 5;
 const DEFAULT_LOCATION_TITLE = 'Studio';
-
-function randomSlug() {
-  const bytes = randomBytes(RANDOM_SLUG_LENGTH);
-  let slug = '';
-  for (let i = 0; i < RANDOM_SLUG_LENGTH; i++) slug += SLUG_ALPHABET[bytes[i] % SLUG_ALPHABET.length];
-  return slug;
-}
 
 // "Reset to default" = the state a fresh admin starts in: no template,
 // the single backfilled default location (scripts/migrate.js), and a
@@ -21,7 +12,7 @@ function randomSlug() {
 export async function resetSettings(req, res) {
   const db = getDb();
   const adminId = req.adminId;
-  const now = Math.floor(Date.now() / 1000);
+  const now = nowUnix();
 
   for (let attempt = 0; attempt < SLUG_GEN_ATTEMPTS; attempt++) {
     const slug = randomSlug();
@@ -30,8 +21,12 @@ export async function resetSettings(req, res) {
         { sql: 'DELETE FROM templates WHERE admin_id = ?', args: [adminId] },
         { sql: 'DELETE FROM locations WHERE admin_id = ?', args: [adminId] },
         { sql: 'INSERT INTO locations (admin_id, title, created_at) VALUES (?, ?, ?)', args: [adminId, DEFAULT_LOCATION_TITLE, now] },
-        { sql: `UPDATE slots SET location_id = (SELECT id FROM locations WHERE admin_id = ? AND title = ?)
-                WHERE admin_id = ?`, args: [adminId, DEFAULT_LOCATION_TITLE, adminId] },
+        // Keyed on last_insert_rowid() — the row the previous statement just
+        // inserted — rather than on `title = 'Studio'`. Matching by title made
+        // the subquery non-deterministic if the teacher happened to have
+        // another location also called Studio: SQLite would pick one
+        // arbitrarily and re-point every slot at it.
+        { sql: 'UPDATE slots SET location_id = last_insert_rowid() WHERE admin_id = ?', args: [adminId] },
         { sql: `UPDATE admins SET slug = ?
                 WHERE id = ? AND NOT EXISTS (SELECT 1 FROM admins WHERE slug = ? AND id <> ?)`, args: [slug, adminId, slug, adminId] },
       ],
@@ -44,5 +39,18 @@ export async function resetSettings(req, res) {
     // Slug collision: the batch already committed the reset with the
     // old slug; the retry re-runs the (idempotent) reset with a fresh slug.
   }
-  res.status(500).json({ error: 'slug_generation_failed' });
+  // Every attempt collided (26^6 per try, so effectively unreachable). The
+  // reset itself HAS committed by now, so a 500 would tell the teacher the
+  // operation failed when their templates and locations are already gone.
+  // Report success with the slug they still have — only the rotation failed.
+  const current = await db.execute({ sql: 'SELECT slug FROM admins WHERE id = ?', args: [adminId] });
+  const loc = await db.execute({
+    sql: 'SELECT id FROM locations WHERE admin_id = ? ORDER BY id DESC LIMIT 1',
+    args: [adminId],
+  });
+  res.status(200).json({
+    slug: current.rows[0]?.slug ?? null,
+    location_id: loc.rows[0] ? Number(loc.rows[0].id) : null,
+    slug_unchanged: true,
+  });
 }

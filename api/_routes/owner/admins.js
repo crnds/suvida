@@ -1,17 +1,9 @@
-import { randomBytes } from 'node:crypto';
 import { getDb } from '../../_lib/db.js';
-import { hashPassword } from '../../_lib/auth.js';
-
-const SLUG_ALPHABET = 'abcdefghijklmnopqrstuvwxyz';
-const SLUG_LENGTH = 6;
-const SLUG_GEN_ATTEMPTS = 5;
-
-function randomSlug() {
-  const bytes = randomBytes(SLUG_LENGTH);
-  let slug = '';
-  for (let i = 0; i < SLUG_LENGTH; i++) slug += SLUG_ALPHABET[bytes[i] % SLUG_ALPHABET.length];
-  return slug;
-}
+import { nowUnix } from '../../_lib/time.js';
+import { badRequest } from '../../_lib/respond.js';
+import { hashPassword, destroyAdminSessions } from '../../_lib/auth.js';
+import { randomSlug, SLUG_GEN_ATTEMPTS, isSlugCollision } from '../../_lib/slug.js';
+import { isId, isPassword, cleanText, cleanOptionalText, MAX_USERNAME } from '../../_lib/validate.js';
 
 export async function listAdmins(req, res) {
   const db = getDb();
@@ -26,14 +18,20 @@ export async function listAdmins(req, res) {
 // collisions rare, but the UNIQUE constraint is the actual guard.
 export async function createAdmin(req, res) {
   const { username, password, display_name } = req.body ?? {};
-  if (!username || !password || !display_name) {
-    res.status(400).json({ error: 'invalid_request' });
+  // Truthiness alone let non-strings through: `username: {}` was rejected by
+  // the driver as a 500, and `password: 12345` threw inside scrypt. An
+  // uncapped password also meant scrypt could be pointed at megabytes of
+  // input, which is CPU burn per request.
+  const uname = cleanText(username, MAX_USERNAME);
+  const dname = cleanText(display_name);
+  if (!uname || !dname || !isPassword(password)) {
+    badRequest(res);
     return;
   }
 
   const db = getDb();
   const passwordHash = await hashPassword(password);
-  const now = Math.floor(Date.now() / 1000);
+  const now = nowUnix();
 
   for (let attempt = 0; attempt < SLUG_GEN_ATTEMPTS; attempt++) {
     const slug = randomSlug();
@@ -42,7 +40,7 @@ export async function createAdmin(req, res) {
         sql: `INSERT INTO admins (username, password_hash, display_name, slug, created_at)
               SELECT ?, ?, ?, ?, ?
                WHERE NOT EXISTS (SELECT 1 FROM admins WHERE username = ?)`,
-        args: [username, passwordHash, display_name, slug, now, username],
+        args: [uname, passwordHash, dname, slug, now, uname],
       });
       if (result.rowsAffected === 0) {
         res.status(409).json({ error: 'username_taken' });
@@ -50,10 +48,10 @@ export async function createAdmin(req, res) {
       }
       res
         .status(201)
-        .json({ id: Number(result.lastInsertRowid), username, display_name, slug, created_at: now });
+        .json({ id: Number(result.lastInsertRowid), username: uname, display_name: dname, slug, created_at: now });
       return;
     } catch (err) {
-      if (String(err).includes('UNIQUE') && String(err).includes('slug')) continue;
+      if (isSlugCollision(err)) continue;
       throw err;
     }
   }
@@ -62,13 +60,28 @@ export async function createAdmin(req, res) {
 
 export async function updateAdmin(req, res, params) {
   const id = Number(params.id);
-  if (!Number.isInteger(id)) {
-    res.status(400).json({ error: 'invalid_request' });
+  if (!isId(id)) {
+    badRequest(res);
     return;
   }
   const { display_name, password } = req.body ?? {};
   if (display_name === undefined && password === undefined) {
-    res.status(400).json({ error: 'invalid_request' });
+    badRequest(res);
+    return;
+  }
+  // Both fields used to be passed straight through. `password: 12345` threw
+  // ERR_INVALID_ARG_TYPE inside scrypt (an unhandled 500), `password: null`
+  // slipped past the `!== undefined` test and did the same, and
+  // `display_name: null` reached the second branch below, which wrote NULL
+  // directly into a NOT NULL column — another 500. The two branches also
+  // disagreed about null: the first treated it as "keep", the second as "set".
+  const name = cleanOptionalText(display_name);
+  if (name === null) {
+    badRequest(res);
+    return;
+  }
+  if (password !== undefined && !isPassword(password)) {
+    badRequest(res);
     return;
   }
 
@@ -77,12 +90,16 @@ export async function updateAdmin(req, res, params) {
     const passwordHash = await hashPassword(password);
     await db.execute({
       sql: 'UPDATE admins SET display_name = COALESCE(?, display_name), password_hash = ? WHERE id = ?',
-      args: [display_name ?? null, passwordHash, id],
+      args: [name ?? null, passwordHash, id],
     });
+    // A password change must not leave older sessions usable — otherwise a
+    // stolen token outlives the credential it was issued against for up to
+    // 30 days.
+    await destroyAdminSessions(db, id);
   } else {
     await db.execute({
       sql: 'UPDATE admins SET display_name = ? WHERE id = ?',
-      args: [display_name, id],
+      args: [name, id],
     });
   }
 
@@ -101,11 +118,15 @@ export async function updateAdmin(req, res, params) {
 // admin deletion cascades via explicit DELETEs with no AFTER DELETE trigger.
 export async function deleteAdmin(req, res, params) {
   const id = Number(params.id);
-  if (!Number.isInteger(id)) {
-    res.status(400).json({ error: 'invalid_request' });
+  if (!isId(id)) {
+    badRequest(res);
     return;
   }
   const db = getDb();
+  // `locations` was missing from this cascade, so deleting a teacher left
+  // their location rows behind forever. Both this list and plan.md's copy of
+  // it predate the multiple-locations feature, and nothing covered
+  // deleteAdmin, so it stayed invisible.
   await db.batch(
     [
       { sql: 'DELETE FROM booking_events WHERE admin_id = ?', args: [id] },
@@ -113,6 +134,7 @@ export async function deleteAdmin(req, res, params) {
       { sql: 'DELETE FROM slots WHERE admin_id = ?', args: [id] },
       { sql: 'DELETE FROM week_activations WHERE admin_id = ?', args: [id] },
       { sql: 'DELETE FROM templates WHERE admin_id = ?', args: [id] },
+      { sql: 'DELETE FROM locations WHERE admin_id = ?', args: [id] },
       { sql: 'DELETE FROM sessions WHERE admin_id = ?', args: [id] },
       { sql: 'DELETE FROM admins WHERE id = ?', args: [id] },
     ],

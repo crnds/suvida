@@ -7,4 +7,7 @@ node_modules/
 .vercel
 .DS_Store
 .env*
+# ...but the placeholder template is meant to be committed; README §2 and
+# plan.md's directory layout both point at it.
+!.env.example
 qa-shots/

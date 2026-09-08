@@ -1,6 +1,8 @@
 import { getDb } from '../../_lib/db.js';
-
-const MAX_TITLE_LENGTH = 100;
+import { nowUnix } from '../../_lib/time.js';
+import { badRequest } from '../../_lib/respond.js';
+import { isId, cleanText } from '../../_lib/validate.js';
+import { conflictOrMissing } from '../../_lib/respond.js';
 
 export async function listLocations(req, res) {
   const db = getDb();
@@ -13,13 +15,15 @@ export async function listLocations(req, res) {
 
 export async function addLocation(req, res) {
   const { title } = req.body ?? {};
-  const trimmed = typeof title === 'string' ? title.trim() : '';
-  if (!trimmed || trimmed.length > MAX_TITLE_LENGTH) {
-    res.status(400).json({ error: 'invalid_request' });
+  // cleanText applies the same trim-and-cap this handler already did by hand;
+  // it is now the single rule every free-text field shares.
+  const trimmed = cleanText(title);
+  if (!trimmed) {
+    badRequest(res);
     return;
   }
   const db = getDb();
-  const now = Math.floor(Date.now() / 1000);
+  const now = nowUnix();
   const result = await db.execute({
     sql: 'INSERT INTO locations (admin_id, title, created_at) VALUES (?, ?, ?)',
     args: [req.adminId, trimmed, now],
@@ -34,8 +38,8 @@ export async function addLocation(req, res) {
 // leaving templates/slots with a dangling location_id.
 export async function removeLocation(req, res, params) {
   const id = Number(params.id);
-  if (!Number.isInteger(id)) {
-    res.status(400).json({ error: 'invalid_request' });
+  if (!isId(id)) {
+    badRequest(res);
     return;
   }
   const db = getDb();
@@ -47,11 +51,9 @@ export async function removeLocation(req, res, params) {
     args: [id, req.adminId, id, id],
   });
   if (result.rowsAffected === 0) {
-    const exists = await db.execute({
-      sql: 'SELECT 1 FROM locations WHERE id = ? AND admin_id = ?',
-      args: [id, req.adminId],
+    await conflictOrMissing(res, db, {
+      table: 'locations', id, adminId: req.adminId, conflictCode: 'location_in_use',
     });
-    res.status(exists.rows[0] ? 409 : 404).json({ error: exists.rows[0] ? 'location_in_use' : 'not_found' });
     return;
   }
   res.status(200).json({ ok: true });

@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#fbf9f6">
-<title>Suvida — Owner</title>
+<title data-i18n="title_owner">Suvida — Owner</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+Thai:wght@400;500&family=Noto+Sans+Thai:wght@400;500;600&display=swap" rel="stylesheet">
@@ -32,7 +32,7 @@
   <section id="login-section" class="hidden panel--auth">
     <div class="card stack">
       <h2 class="text-h3" data-i18n="login_title"></h2>
-      <form id="login-form" class="stack-tight">
+      <form id="login-form" class="stack-tight" novalidate>
         <div class="field">
           <label for="login-username" data-i18n="login_username"></label>
           <input class="input" id="login-username" type="text" autocomplete="username" required>
@@ -54,11 +54,11 @@
       <div class="section__head">
         <h3 class="section__title" data-i18n="owner_admin_create_title"></h3>
       </div>
-      <form id="create-form" class="stack-tight">
+      <form id="create-form" class="stack-tight" novalidate>
         <div class="grid-auto">
           <div class="field">
             <label for="ca-username" data-i18n="owner_admin_username"></label>
-            <input class="input" id="ca-username" type="text" autocomplete="off" required>
+            <input class="input" id="ca-username" maxlength="64" type="text" autocomplete="off" required>
           </div>
           <div class="field">
             <label for="ca-password" data-i18n="owner_admin_password"></label>
@@ -66,7 +66,7 @@
           </div>
           <div class="field">
             <label for="ca-display-name" data-i18n="owner_admin_display_name"></label>
-            <input class="input" id="ca-display-name" type="text" required>
+            <input class="input" id="ca-display-name" maxlength="100" type="text" required>
           </div>
         </div>
         <div id="create-error" class="field-error hidden" role="alert"></div>
@@ -92,6 +92,7 @@
 
 <script src="/shared/i18n.js"></script>
 <script src="/shared/format.js"></script>
+<script src="/shared/validate.js"></script>
 <script src="/shared/api.js"></script>
 <script src="/shared/ui.js"></script>
 <script src="/owner/app.js"></script>

@@ -55,22 +55,54 @@ async function apiFetch(path, opts = {}) {
   }
 
   if (!res.ok) {
+    // Session expiry had no handler anywhere. The admin left a tab open past
+    // the 30-day expiry, the notification poller swallowed its 401 silently,
+    // and every subsequent action toasted "Please log in again" while doing
+    // nothing — with no login form to return to and no way to reach one
+    // short of a manual reload. Pages register a handler via
+    // Api.onUnauthorized(); login itself opts out, since a wrong password is
+    // also a 401 and must stay on the form.
+    if (res.status === 401 && !opts.allowUnauthorized) {
+      notifyUnauthorized();
+    }
     throw new ApiError(res.status, data);
   }
   return data;
 }
 
+let unauthorizedHandler = null;
+let unauthorizedNotified = false;
+function notifyUnauthorized() {
+  // Fires once per expiry, so a burst of parallel requests can't drive the
+  // page back to the login screen several times over.
+  if (unauthorizedNotified || !unauthorizedHandler) return;
+  unauthorizedNotified = true;
+  try {
+    unauthorizedHandler();
+  } finally {
+    window.setTimeout(() => { unauthorizedNotified = false; }, 1000);
+  }
+}
+
 const Api = {
+  // Registered by admin/app.js and owner/app.js so an expired session sends
+  // the user back to the login form instead of into a dead UI.
+  onUnauthorized(fn) { unauthorizedHandler = fn; },
+
   // owner
-  ownerLogin: (username, password) => apiFetch('/api/owner/login', { method: 'POST', body: { username, password } }),
-  listAdmins: () => apiFetch('/api/owner/admins'),
+  ownerLogin: (username, password) => apiFetch('/api/owner/login', { method: 'POST', body: { username, password }, allowUnauthorized: true }),
+  ownerLogout: () => apiFetch('/api/owner/logout', { method: 'POST' }),
+  listAdmins: (opts) => apiFetch('/api/owner/admins', opts),
   createAdmin: (payload) => apiFetch('/api/owner/admins', { method: 'POST', body: payload }),
   updateAdmin: (id, payload) => apiFetch(`/api/owner/admins/${id}`, { method: 'PATCH', body: payload }),
   deleteAdmin: (id) => apiFetch(`/api/owner/admins/${id}`, { method: 'DELETE' }),
 
   // admin
-  adminLogin: (username, password, remember) => apiFetch('/api/admin/login', { method: 'POST', body: { username, password, remember } }),
-  adminMe: () => apiFetch('/api/admin/me'),
+  adminLogin: (username, password, remember) => apiFetch('/api/admin/login', { method: 'POST', body: { username, password, remember }, allowUnauthorized: true }),
+  adminLogout: () => apiFetch('/api/admin/logout', { method: 'POST' }),
+  // Used by init() as a "am I logged in?" probe, so its 401 is expected and
+  // must not fire the session-expired handler.
+  adminMe: (opts) => apiFetch('/api/admin/me', opts),
   setSlug: (slug) => apiFetch('/api/admin/slug', { method: 'PATCH', body: { slug } }),
   regenerateSlug: () => apiFetch('/api/admin/slug/regenerate', { method: 'POST' }),
   resetSettings: () => apiFetch('/api/admin/settings/reset', { method: 'POST' }),

@@ -1,8 +1,10 @@
 import { getDb } from '../../_lib/db.js';
-import { canonicalizePhone } from '../../_lib/phone.js';
-import { checkRateLimit, getClientIp } from '../../_lib/ratelimit.js';
+import { nowUnix } from '../../_lib/time.js';
+import { canonicalizePhone, isValidPhone } from '../../_lib/phone.js';
+import { badRequest, ipRateLimited, rateLimited } from '../../_lib/respond.js';
+import { isValidSlug } from '../../_lib/slug.js';
+import { isId } from '../../_lib/validate.js';
 
-const SLUG_RE = /^[a-z]{6}$/;
 const LIMIT = 10;
 
 // slug + booking id + canonical phone are all tested inside one conditional
@@ -12,30 +14,22 @@ const LIMIT = 10;
 // guard tripped (plan.md Key flows §4).
 export async function cancelBooking(req, res) {
   const db = getDb();
-  const ip = getClientIp(req);
-  const ipLimit = await checkRateLimit(db, `public/cancel:${ip}`, LIMIT);
-  if (!ipLimit.allowed) {
-    res.setHeader('Retry-After', String(ipLimit.retryAfter));
-    res.status(429).json({ error: 'rate_limited' });
-    return;
-  }
+  if (await ipRateLimited(res, db, 'public/cancel', LIMIT, req)) return;
 
   const { slug, booking_id, phone } = req.body ?? {};
   const bookingId = Number(booking_id);
-  if (typeof slug !== 'string' || !SLUG_RE.test(slug) || !Number.isInteger(bookingId) || !phone) {
-    res.status(400).json({ error: 'invalid_request' });
+  // The phone check matters most here: this route authenticates on
+  // booking_id + booker_phone alone, so accepting a junk phone that
+  // canonicalised to '' let anyone cancel any other empty-phone booking.
+  if (!isValidSlug(slug) || !isId(bookingId) || !isValidPhone(phone)) {
+    badRequest(res);
     return;
   }
   const canonPhone = canonicalizePhone(phone);
 
-  const phoneLimit = await checkRateLimit(db, `public/cancel:phone:${canonPhone}`, LIMIT);
-  if (!phoneLimit.allowed) {
-    res.setHeader('Retry-After', String(phoneLimit.retryAfter));
-    res.status(429).json({ error: 'rate_limited' });
-    return;
-  }
+  if (await rateLimited(res, db, `public/cancel:phone:${canonPhone}`, LIMIT)) return;
 
-  const now = Math.floor(Date.now() / 1000);
+  const now = nowUnix();
   const result = await db.execute({
     sql: `UPDATE bookings
              SET cancelled_at = ?, last_actor = 'booker'

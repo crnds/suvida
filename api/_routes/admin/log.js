@@ -1,20 +1,11 @@
 import { getDb } from '../../_lib/db.js';
-import { unixFromBangkokDateTime } from '../../_lib/time.js';
+import { badRequest } from '../../_lib/respond.js';
+import { bangkokMonthBounds, isValidMonthString } from '../../_lib/time.js';
+import { isId } from '../../_lib/validate.js';
 
 const LIMIT = 50;
-const MONTH_RE = /^\d{4}-\d{2}$/;
 const TYPE_VALUES = new Set(['booked', 'cancelled', 'moved', 'edited']);
 const ACTOR_VALUES = new Set(['booker', 'admin']);
-
-function monthBounds(monthStr) {
-  const [y, m] = monthStr.split('-').map(Number);
-  const nextY = m === 12 ? y + 1 : y;
-  const nextM = m === 12 ? 1 : m + 1;
-  return {
-    start: unixFromBangkokDateTime(`${monthStr}-01`, 0, 0),
-    end: unixFromBangkokDateTime(`${nextY}-${String(nextM).padStart(2, '0')}-01`, 0, 0),
-  };
-}
 
 // Keyset pagination on id, not LIMIT/OFFSET — offset pagination silently
 // skips or repeats rows when new events land mid-scroll, which is exactly
@@ -26,27 +17,29 @@ export async function listLog(req, res) {
   const { type, actor, month, cursor } = req.query ?? {};
 
   if (type !== undefined && !TYPE_VALUES.has(type)) {
-    res.status(400).json({ error: 'invalid_request' });
+    badRequest(res);
     return;
   }
   if (actor !== undefined && !ACTOR_VALUES.has(actor)) {
-    res.status(400).json({ error: 'invalid_request' });
+    badRequest(res);
     return;
   }
   let monthStart = null;
   let monthEnd = null;
   if (month !== undefined) {
-    if (!MONTH_RE.test(month)) {
-      res.status(400).json({ error: 'invalid_request' });
+    if (!isValidMonthString(month)) {
+      badRequest(res);
       return;
     }
-    ({ start: monthStart, end: monthEnd } = monthBounds(month));
+    ({ start: monthStart, end: monthEnd } = bangkokMonthBounds(month));
   }
   let cursorId = null;
   if (cursor !== undefined) {
     cursorId = Number(cursor);
-    if (!Number.isInteger(cursorId)) {
-      res.status(400).json({ error: 'invalid_request' });
+    // Number.isInteger accepted '1e3' (-> 1000) and '' (-> 0); isId also
+    // rejects 1e20 and anything non-positive.
+    if (!isId(cursorId)) {
+      badRequest(res);
       return;
     }
   }

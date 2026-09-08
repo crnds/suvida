@@ -1,5 +1,6 @@
 // scrypt password hashing, opaque session tokens, cookie helpers.
 import { randomBytes, scrypt as scryptCb, timingSafeEqual } from 'node:crypto';
+import { nowUnix } from './time.js';
 import { promisify } from 'node:util';
 
 const scrypt = promisify(scryptCb);
@@ -14,10 +15,34 @@ export async function hashPassword(password) {
 }
 
 export async function verifyPassword(password, stored) {
+  // A malformed stored value (no colon, empty hash) used to throw — either a
+  // TypeError from Buffer.from(undefined) or a RangeError from a zero keylen
+  // — surfacing as a 500 instead of a failed login.
+  if (typeof password !== 'string' || typeof stored !== 'string') return false;
   const [salt, hashHex] = stored.split(':');
+  if (!salt || !hashHex) return false;
   const expected = Buffer.from(hashHex, 'hex');
+  if (expected.length === 0) return false;
   const derived = await scrypt(password, salt, expected.length);
   return expected.length === derived.length && timingSafeEqual(expected, derived);
+}
+
+// A real scrypt hash of a throwaway value, used to spend the same CPU on a
+// username miss as on a hit.
+const DUMMY_HASH =
+  '0000000000000000000000000000000000000000000000000000000000000000:' +
+  '0000000000000000000000000000000000000000000000000000000000000000' +
+  '0000000000000000000000000000000000000000000000000000000000000000';
+
+// Both login routes short-circuited with `!row || !(await verifyPassword(…))`.
+// `||` means an unknown username returned after one DB round trip while a
+// known one additionally ran scrypt at default cost (~50-150 ms) — a gap
+// wide enough to enumerate valid teacher usernames by response latency and
+// then aim brute force at real accounts. The generic 401 body was already
+// identical; only the timing gave it away. Always doing the work removes it.
+export async function verifyPasswordOrDummy(password, stored) {
+  const ok = await verifyPassword(password, stored ?? DUMMY_HASH);
+  return stored ? ok : false;
 }
 
 // Prunes expired sessions in the same batch as the insert — see
@@ -25,7 +50,7 @@ export async function verifyPassword(password, stored) {
 // null for owner sessions.
 export async function createSession(db, role, adminId) {
   const token = randomBytes(32).toString('hex');
-  const now = Math.floor(Date.now() / 1000);
+  const now = nowUnix();
   const expiresAt = now + SESSION_DURATION_SECONDS;
   await db.batch(
     [
@@ -40,9 +65,23 @@ export async function createSession(db, role, adminId) {
   return token;
 }
 
+// Server-side revocation. Without this there was no way to end a session at
+// all: the cookie is HttpOnly, so the clients' `document.cookie = '…Max-Age=0'`
+// was a no-op, and the row survived until its 30-day expiry.
+export async function destroySession(db, token) {
+  if (!token) return;
+  await db.execute({ sql: 'DELETE FROM sessions WHERE token = ?', args: [token] });
+}
+
+// Every session belonging to one admin — used on password change, so a
+// stolen token can't outlive the credential it was issued against.
+export async function destroyAdminSessions(db, adminId) {
+  await db.execute({ sql: 'DELETE FROM sessions WHERE admin_id = ?', args: [adminId] });
+}
+
 export async function verifySession(db, token) {
   if (!token) return null;
-  const now = Math.floor(Date.now() / 1000);
+  const now = nowUnix();
   const result = await db.execute({
     sql: 'SELECT role, admin_id FROM sessions WHERE token = ? AND expires_at > ?',
     args: [token, now],
@@ -60,6 +99,15 @@ export function setSessionCookie(res, token, remember = true) {
   res.setHeader(
     'Set-Cookie',
     `${SESSION_COOKIE}=${token}; HttpOnly; Secure; SameSite=Lax; Path=/${persistence}`
+  );
+}
+
+// Mirrors setSessionCookie's flags — a Set-Cookie that differs in Path,
+// Secure or SameSite would not overwrite the cookie it is trying to clear.
+export function clearSessionCookie(res) {
+  res.setHeader(
+    'Set-Cookie',
+    `${SESSION_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`
   );
 }
 

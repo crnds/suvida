@@ -23,15 +23,32 @@ export function createRouter() {
 
   async function dispatch(req, res, path) {
     const normalized = path === '' ? '/' : path;
+    const allowed = new Set();
     for (const route of routes) {
-      if (route.method !== req.method) continue;
       const match = route.regex.exec(normalized);
       if (!match) continue;
+      // The path exists; remember which verbs serve it so a method mismatch
+      // can answer 405 + Allow instead of a misleading 404.
+      allowed.add(route.method);
+      if (route.method !== req.method) continue;
       const params = {};
-      route.paramNames.forEach((name, i) => {
-        params[name] = decodeURIComponent(match[i + 1]);
-      });
+      for (let i = 0; i < route.paramNames.length; i++) {
+        try {
+          params[route.paramNames[i]] = decodeURIComponent(match[i + 1]);
+        } catch {
+          // `([^/]+)` happily matches a bare '%', and decodeURIComponent then
+          // throws URIError. With no try/catch in the entry points that was an
+          // uncaught throw — a 500 — on all 8 parameterised routes.
+          res.status(400).json({ error: 'invalid_request' });
+          return;
+        }
+      }
       return route.handler(req, res, params);
+    }
+    if (allowed.size > 0) {
+      res.setHeader('Allow', [...allowed].join(', '));
+      res.status(405).json({ error: 'method_not_allowed' });
+      return;
     }
     res.status(404).json({ error: 'not_found' });
   }
@@ -47,6 +64,13 @@ export function createRouter() {
 // Parsing req.url sidesteps it and works the same in dev and production.
 export function pathFromRequest(req, prefix) {
   const pathname = new URL(req.url, 'http://localhost').pathname;
-  const sub = pathname.startsWith(prefix) ? pathname.slice(prefix.length) : pathname;
+  // On a prefix mismatch this used to fall through to the *full* pathname,
+  // which no route pattern can match — safe today only because no admin or
+  // owner pattern begins with '/api'. Returning a sentinel keeps that from
+  // being load-bearing. (new URL() already normalises '..', so
+  // /api/admin/../owner/admins resolves before we ever see it — there is no
+  // traversal into another scope's route table.)
+  if (!pathname.startsWith(prefix)) return '/__unmatched__';
+  const sub = pathname.slice(prefix.length);
   return sub === '' ? '/' : sub;
 }

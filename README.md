@@ -116,7 +116,7 @@ delete `local.db*` any time you want a clean slate; re-run `migrate.js` +
 ## 4. Running the smoke tests
 
 `scripts/smoke.js` drives the full verification suite from *plan.md*
-("Verification", 21 cases) against a running `vercel dev` + `file:local.db`:
+("Verification", 30 groups) against a running `vercel dev` + `file:local.db`:
 idempotent migrations, the booking race guards, cancel/attribution rules,
 notification unread counts, log pagination, rate limiting, and the
 serverless function-count ceiling.

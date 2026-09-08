@@ -7,6 +7,7 @@
     "seed": "node scripts/seed.js",
     "seed:qa": "node scripts/seed-qa.js",
     "dev": "node scripts/devserver.js",
+    "test": "node --test scripts/time.test.js",
     "smoke": "node scripts/smoke.js",
     "qa": "node scripts/uiqa.js",
     "qa:all": "node scripts/uiqa.js all",

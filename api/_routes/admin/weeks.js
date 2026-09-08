@@ -1,14 +1,25 @@
 import { getDb } from '../../_lib/db.js';
-import { bangkokWeekStartSunday, unixFromBangkokDateTime, DAY_SECONDS, BANGKOK_OFFSET_SECONDS } from '../../_lib/time.js';
+import { badRequest } from '../../_lib/respond.js';
+import {
+  bangkokWeekStartSunday,
+  unixFromBangkokDateTime,
+  isValidDateString,
+  DAY_SECONDS,
+  BANGKOK_OFFSET_SECONDS,
+  nowUnix,
+} from '../../_lib/time.js';
 
 const WEEK_SECONDS = 7 * DAY_SECONDS;
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const BULK_MAX_WEEKS = 26;
 const DEFAULT_LIST_WEEKS = 8;
 const MAX_LIST_WEEKS = 52;
 
 function normalizeWeekStart(dateStr) {
-  if (typeof dateStr !== 'string' || !DATE_RE.test(dateStr)) return null;
+  // isValidDateString rather than a shape regex: `2026-13-45` matched the
+  // regex and Date.UTC rolled it over to 2027-02-14, so slots were
+  // materialised a year out and the response echoed the *corrected* date,
+  // leaving the client no way to tell.
+  if (!isValidDateString(dateStr)) return null;
   // Auto-corrects to the Sunday of whichever week the given date falls in,
   // rather than rejecting a non-Sunday input — activation is idempotent
   // either way (plan.md: "week_start is always a Sunday in Asia/Bangkok").
@@ -23,28 +34,29 @@ function nextWeekStart(weekStart) {
 // INSERT OR IGNORE) and records the activation, in one batch. Reused by
 // both "activate" and "Re-apply template" — plan.md Key flows §1 says the
 // latter is "the same INSERT OR IGNORE batch under a clearer name."
+function materializeWeekStatements(adminId, weekStart, activatedAt) {
+  return [
+    {
+      sql: `INSERT OR IGNORE INTO slots (admin_id, start_unix, source, blocked, location_id)
+            SELECT t.admin_id,
+                   CAST(strftime('%s', date(?, '+' || t.weekday || ' days')) AS INTEGER)
+                     - ${BANGKOK_OFFSET_SECONDS} + t.start_minutes * 60,
+                   'template', 0, t.location_id
+              FROM templates t
+             WHERE t.admin_id = ?`,
+      args: [weekStart, adminId],
+    },
+    {
+      sql: `INSERT OR IGNORE INTO week_activations (admin_id, week_start_date, activated_at)
+            VALUES (?, ?, ?)`,
+      args: [adminId, weekStart, activatedAt],
+    },
+  ];
+}
+
 async function materializeWeek(db, adminId, weekStart) {
-  const activatedAt = Math.floor(Date.now() / 1000);
-  await db.batch(
-    [
-      {
-        sql: `INSERT OR IGNORE INTO slots (admin_id, start_unix, source, blocked, location_id)
-              SELECT t.admin_id,
-                     CAST(strftime('%s', date(?, '+' || t.weekday || ' days')) AS INTEGER)
-                       - ${BANGKOK_OFFSET_SECONDS} + t.start_minutes * 60,
-                     'template', 0, t.location_id
-                FROM templates t
-               WHERE t.admin_id = ?`,
-        args: [weekStart, adminId],
-      },
-      {
-        sql: `INSERT OR IGNORE INTO week_activations (admin_id, week_start_date, activated_at)
-              VALUES (?, ?, ?)`,
-        args: [adminId, weekStart, activatedAt],
-      },
-    ],
-    'write'
-  );
+  const activatedAt = nowUnix();
+  await db.batch(materializeWeekStatements(adminId, weekStart, activatedAt), 'write');
 }
 
 // Lists upcoming weeks with their activation status — the data source for
@@ -61,7 +73,7 @@ export async function listWeeks(req, res) {
   const activated = new Set(result.rows.map((r) => r.week_start_date));
 
   const weeks = [];
-  let cursor = bangkokWeekStartSunday(Math.floor(Date.now() / 1000));
+  let cursor = bangkokWeekStartSunday(nowUnix());
   for (let i = 0; i < count; i++) {
     weeks.push({ week_start_date: cursor, activated: activated.has(cursor) });
     cursor = nextWeekStart(cursor);
@@ -119,16 +131,24 @@ export async function bulkActivate(req, res) {
   const { weeks } = req.body ?? {};
   const count = Number(weeks);
   if (!Number.isInteger(count) || count < 1 || count > BULK_MAX_WEEKS) {
-    res.status(400).json({ error: 'invalid_request' });
+    badRequest(res);
     return;
   }
   const db = getDb();
-  let cursor = bangkokWeekStartSunday(Math.floor(Date.now() / 1000));
+  const activatedAt = nowUnix();
+  let cursor = bangkokWeekStartSunday(activatedAt);
   const activatedWeeks = [];
+  const statements = [];
   for (let i = 0; i < count; i++) {
-    await materializeWeek(db, req.adminId, cursor);
+    statements.push(...materializeWeekStatements(req.adminId, cursor, activatedAt));
     activatedWeeks.push(cursor);
     cursor = nextWeekStart(cursor);
   }
+  // One batch, not `await materializeWeek()` in a loop. At the 26-week
+  // maximum that loop was 52 sequential round trips to Turso, which on
+  // Hobby's 10 s ceiling could time out MID-LOOP — leaving the first N weeks
+  // activated, the rest not, and the client holding a 504 that named neither.
+  // Every statement is INSERT OR IGNORE, so the batch stays idempotent.
+  await db.batch(statements, 'write');
   res.status(200).json({ activated: activatedWeeks });
 }

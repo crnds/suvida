@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#fbf9f6">
-<title>Suvida Piano Studio</title>
+<title data-i18n="app_name">Suvida Piano Studio</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+Thai:wght@400;500&family=Noto+Sans+Thai:wght@400;500;600&display=swap" rel="stylesheet">
@@ -15,15 +15,20 @@
 </head>
 <body>
 
+<!-- This page was the only one with no skip link and no #main target. -->
+<a class="skip-link" href="#main" data-i18n="a11y_skip_to_content"></a>
+
 <header class="app-header">
-  <div class="app-header__brand" data-i18n="app_name"></div>
+  <!-- An <h1>, matching every other page, where the brand IS the heading.
+       It was a <div> here while a second <h1> below repeated the identical
+       string, so "Suvida Piano Studio" was printed twice. -->
+  <h1 class="app-header__brand" data-i18n="app_name"></h1>
   <div class="app-header__actions">
     <div id="lang-toggle"></div>
   </div>
 </header>
 
-<main class="page center panel--auth">
-  <h1 class="text-h1" data-i18n="landing_title"></h1>
+<main class="page center panel--auth" id="main">
   <p class="text-body muted measure landing__lede" data-i18n="landing_body"></p>
 
   <div class="stack-tight">

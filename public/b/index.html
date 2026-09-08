@@ -29,12 +29,18 @@
 </header>
 
 <main class="page" id="main">
-  <div id="not-found" class="hidden">
-    <p class="banner banner--error"><span class="banner__text" data-i18n="booker_teacher_not_found"></span></p>
+  <!-- role="alert" so a student arriving on a stale link actually hears why
+       the page is empty. This is the one hand-rolled banner in the app; every
+       other one comes from UI.banner(), which sets the role for the error
+       kind and adds the icon. -->
+  <div id="not-found" class="hidden" role="alert">
+    <p class="banner banner--error">
+      <i class="fa-solid fa-circle-exclamation icon" aria-hidden="true"></i><span class="banner__text" data-i18n="booker_teacher_not_found"></span>
+    </p>
   </div>
 
   <div id="app-body" class="hidden">
-    <nav class="tabs" role="tablist" aria-label="Sections">
+    <nav class="tabs" role="tablist" data-i18n-aria-label="a11y_sections">
       <button class="tab" role="tab" id="tab-btn-book" aria-selected="true">
         <i class="fa-solid fa-calendar-days icon" aria-hidden="true"></i><span data-i18n="booker_tab_book"></span>
       </button>
@@ -62,10 +68,10 @@
           <h2 class="section__title" data-i18n="booker_history_lookup_title"></h2>
         </div>
         <p class="text-helper measure" data-i18n="booker_history_lookup_hint"></p>
-        <form id="lookup-form" class="form-row">
+        <form id="lookup-form" class="form-row" novalidate>
           <div class="field field--grow">
             <label for="lookup-phone" data-i18n="booker_history_lookup_phone_label"></label>
-            <input class="input" type="tel" id="lookup-phone" inputmode="tel"
+            <input class="input" type="tel" id="lookup-phone" maxlength="20" inputmode="tel"
                    autocomplete="tel"
                    data-i18n-placeholder="booker_history_lookup_phone"
                    aria-describedby="lookup-error" required>
@@ -85,6 +91,7 @@
 
 <script src="/shared/i18n.js"></script>
 <script src="/shared/format.js"></script>
+<script src="/shared/validate.js"></script>
 <script src="/shared/api.js"></script>
 <script src="/shared/ui.js"></script>
 <script src="/shared/calendar.js"></script>

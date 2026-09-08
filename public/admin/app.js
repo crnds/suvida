@@ -23,6 +23,11 @@ const STATE = {
   dayPanel: null,
   // Rapid month paging fires overlapping requests; only the newest may paint.
   monthToken: 0,
+  // See b/page.js: held so a language toggle repaints a failed month's error
+  // instead of replacing it with an empty-looking calendar.
+  monthError: null,
+  // Overlapping log loads (filter changes, "Load more") must not merge.
+  logToken: 0,
 };
 
 const els = {
@@ -104,12 +109,13 @@ document.addEventListener('i18n:changed', () => {
   populateLogFilterSelects();
   renderTemplate();
   renderWeeks();
-  renderCalendar();
+  if (STATE.monthError) renderMonthError(STATE.monthError);
+  else renderCalendar();
   renderLog();
   renderLocations();
   renderLocationFilterBar();
   els.shareCopyLabel.textContent = I18N.t('settings_share_copy');
-  els.adminLocationFilter.setAttribute('aria-label', I18N.t('calendar_filter_all_locations'));
+  els.adminLocationFilter.setAttribute('aria-label', I18N.t('calendar_filter_location_label'));
   if (STATE.admin) els.brand.textContent = STATE.admin.display_name;
 });
 
@@ -140,7 +146,7 @@ function showApp() {
 
 els.loginForm.addEventListener('submit', async (e) => {
   e.preventDefault();
-  els.loginError.classList.add('hidden');
+  setFieldMessage(els.loginError, '');
   const username = els.loginUsername.value.trim();
   const password = els.loginPassword.value;
   const remember = els.loginRemember.checked;
@@ -156,23 +162,31 @@ els.loginForm.addEventListener('submit', async (e) => {
       const message = err.status === 429 ? I18N.t('login_rate_limited')
         : err.status === 0 ? I18N.t('common_error_network')
         : I18N.t('login_invalid');
-      els.loginError.replaceChildren(
-        UI.icon('circle-exclamation'),
-        UI.el('span', { text: message })
-      );
-      els.loginError.classList.remove('hidden');
+      setFieldMessage(els.loginError, message);
       els.loginUsername.focus();
     }
   });
 });
 
-els.logoutBtn.addEventListener('click', () => {
-  document.cookie = 'suvida_session=; Path=/; Max-Age=0';
-  showLogin();
+// The session cookie is HttpOnly, so the old `document.cookie = '…Max-Age=0'`
+// could not touch it and there was no server route to revoke the row either:
+// "Log out" only hid the DOM, and a reload was still fully authenticated for
+// up to 30 days. The server now deletes the session and clears the cookie.
+els.logoutBtn.addEventListener('click', async () => {
+  await UI.withBusy(els.logoutBtn, async () => {
+    try {
+      await Api.adminLogout();
+    } finally {
+      // Show the login screen either way — a failed logout must not leave
+      // the teacher looking at a session they believe they ended.
+      // showLogin() stops the notification poller.
+      showLogin();
+    }
+  });
 });
 
-async function afterLogin() {
-  const me = await Api.adminMe();
+async function afterLogin(opts) {
+  const me = await Api.adminMe(opts);
   STATE.admin = me.admin;
   showApp();
   populateWeekdaySelect();
@@ -272,11 +286,10 @@ function renderTemplate() {
 }
 
 // Shows a message in a .field-error node, with an icon and an alert role.
-function setFieldMessage(node, message) {
-  if (!message) { node.classList.add('hidden'); node.replaceChildren(); return; }
-  node.replaceChildren(UI.icon('circle-exclamation'), UI.el('span', { text: message }));
-  node.classList.remove('hidden');
-}
+// Thin alias over the shared helper — see ui.js's note on the three copies
+// this replaced. Kept as a local name so the many call sites below read the
+// same as before.
+const setFieldMessage = (node, message) => UI.setFieldError(node, null, message);
 
 els.templateForm.addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -284,7 +297,12 @@ els.templateForm.addEventListener('submit', async (e) => {
   const weekday = Number(els.tfWeekday.value);
   const start_minutes = timeInputToMinutes(els.tfTime.value);
   const location_id = Number(els.tfLocation.value);
-  if (!Number.isInteger(location_id)) {
+  // `> 0`, not Number.isInteger(). With no locations the select is empty, so
+  // .value is '' and Number('') is 0 — which IS an integer, so the guard
+  // passed and location_id: 0 was POSTed, while the fully translated
+  // schedule_template_no_locations_hint could never be shown. It was masked
+  // only because renderLocations() also disables the submit button.
+  if (!(location_id > 0)) {
     setFieldMessage(els.templateError, I18N.t('schedule_template_no_locations_hint'));
     return;
   }
@@ -341,7 +359,15 @@ function weekActionBtn(label, kind, icon, action) {
 els.bulkForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   const weeks = Number(els.bulkWeeks.value);
-  if (!Number.isInteger(weeks) || weeks < 1) return;
+  // The input declares max="26" but type="number" happily accepts a typed
+  // value beyond it, and only the lower bound was checked — so 999 was sent
+  // to bulkActivate, which then rejects it as a 400 the user can't act on.
+  if (!Number.isInteger(weeks) || weeks < 1 || weeks > BULK_MAX_WEEKS) {
+    els.bulkWeeks.setAttribute('aria-invalid', 'true');
+    els.bulkWeeks.focus();
+    return;
+  }
+  els.bulkWeeks.setAttribute('aria-invalid', 'false');
   await UI.withBusy(els.bulkSubmit, async () => {
     try {
       await Api.bulkActivate(weeks);
@@ -390,13 +416,13 @@ function renderLocations() {
     });
     const row = UI.listRow({ main: loc.title, actions: [delBtn] });
     delBtn.addEventListener('click', async () => {
-      const ok = await UI.confirm({
+      // confirmThen keeps the button disabled across the dialog too — see
+      // ui.js. Otherwise a double-tap stacked two confirms and ran twice.
+      await UI.confirmThen(delBtn, {
         title: I18N.t('common_delete'),
         message: I18N.t('settings_locations_delete_confirm', { name: loc.title }),
         confirmLabel: I18N.t('common_delete'),
-      });
-      if (!ok) return;
-      await UI.withBusy(delBtn, async () => {
+      }, async () => {
         try {
           await Api.removeLocation(loc.id);
           STATE.locations = STATE.locations.filter((l) => l.id !== loc.id);
@@ -468,6 +494,9 @@ const adminCal = createMonthCalendar(els.adminCalendar, {
   onMonthChange: (monthStr) => { STATE.month = monthStr; loadCalendarMonth(); },
   onDayClick: (dateStr) => openDayPanel(dateStr),
 });
+
+// Mirrors BULK_MAX_WEEKS in api/_routes/admin/weeks.js and the input's max.
+const BULK_MAX_WEEKS = 26;
 
 const MAX_SLOT_DOTS = 12;
 
@@ -546,21 +575,29 @@ async function loadCalendarMonth(quiet) {
     // language toggle, so setting it there marked the tab loaded before any fetch
     // and setTab('calendar') then skipped loading forever.
     els.adminCalendar.dataset.loaded = '1';
+    STATE.monthError = null;
     renderCalendar();
   } catch (err) {
     if (token !== STATE.monthToken) return;
     // Keep the month nav so a failed month is not a dead end.
-    const retry = UI.button({
-      kind: 'secondary', icon: 'rotate-right', label: I18N.t('common_retry'),
-      onClick: () => loadCalendarMonth(),
-    });
-    adminCal.renderMessage(STATE.month, UI.el('div', { class: 'stack' }, [
-      UI.banner(messageForError(err), 'error'),
-      UI.el('div', { class: 'form-row' }, [retry]),
-    ]));
+    STATE.monthError = err;
+    renderMonthError(err);
   } finally {
     if (token === STATE.monthToken) els.adminCalendar.removeAttribute('aria-busy');
   }
+}
+
+// Split out of loadCalendarMonth's catch so the language toggle can repaint
+// it — see the i18n:changed listener.
+function renderMonthError(err) {
+  const retry = UI.button({
+    kind: 'secondary', icon: 'rotate-right', label: I18N.t('common_retry'),
+    onClick: () => loadCalendarMonth(),
+  });
+  adminCal.renderMessage(STATE.month, UI.el('div', { class: 'stack' }, [
+    UI.banner(messageForError(err), 'error'),
+    UI.el('div', { class: 'form-row' }, [retry]),
+  ]));
 }
 
 // ── Day panel ──────────────────────────────────────────────
@@ -569,21 +606,38 @@ async function openDayPanel(dateStr) {
   adminCal.setSelected(dateStr);
   const body = UI.el('div', { class: 'stack' }, [UI.loadingRow()]);
   const handle = showModal(I18N.t('day_panel_title', { date: fmtWeekdayDate(dateStr) }), body, {
-    onClose: () => adminCal.setSelected(null),
+    onClose: () => {
+      adminCal.setSelected(null);
+      // Clearing this is what stops refreshAfterDayAction() from firing at a
+      // closed panel. It was never nulled, so `if (panel)` was true forever
+      // after the first day panel had ever been opened: every later action
+      // fetched a day nobody was looking at and painted into a detached node
+      // — and the whole subtree, with every closure over its slots, leaked
+      // for the lifetime of the page.
+      STATE.dayPanel = null;
+    },
   });
   // Held so a nested modal (book / edit / move) can refresh this panel after
   // it closes. Safe now that showModal stacks instead of wiping #modal-root:
   // the panel node stays in the document while the child is on top, where it
   // used to be detached and every later refresh painted into an orphan.
-  STATE.dayPanel = { body, dateStr, handle };
+  STATE.dayPanel = { body, dateStr, handle, token: 0 };
   await refreshDayPanel(body, dateStr);
 }
 
 async function refreshDayPanel(body, dateStr) {
+  const panel = STATE.dayPanel;
+  // Newest-request-wins, matching loadMonth/loadCalendarMonth. The booker's
+  // day sheet already guarded with handle.isOpen(); this one captured a
+  // handle and never used it, so tapping day 5, closing, then tapping day 12
+  // could let the day-5 response paint over day 12.
+  const token = panel ? ++panel.token : 0;
   try {
     const data = await Api.adminSlotsDay(dateStr, STATE.calendarLocationFilter);
+    if (panel && (panel !== STATE.dayPanel || token !== panel.token || !panel.handle.isOpen())) return;
     renderDayPanel(body, dateStr, data.slots || []);
   } catch (err) {
+    if (panel && (panel !== STATE.dayPanel || token !== panel.token || !panel.handle.isOpen())) return;
     body.replaceChildren(UI.banner(messageForError(err), 'error'));
   }
 }
@@ -592,7 +646,7 @@ async function refreshDayPanel(body, dateStr) {
 // change, from wherever that change was made.
 async function refreshAfterDayAction() {
   const panel = STATE.dayPanel;
-  if (panel) await refreshDayPanel(panel.body, panel.dateStr);
+  if (panel && panel.handle.isOpen()) await refreshDayPanel(panel.body, panel.dateStr);
   loadCalendarMonth(true);
 }
 
@@ -631,7 +685,7 @@ function buildAddSlotForm(dateStr) {
 
   const errorBox = UI.el('div');
 
-  const form = UI.el('form', { class: 'form-row' }, [
+  const form = UI.el('form', { class: 'form-row', attrs: { novalidate: true } }, [
     UI.el('div', { class: 'field' }, [
       UI.el('label', { text: I18N.t('day_panel_add_slot_time'), attrs: { for: 'add-slot-time' } }),
       timeInput,
@@ -652,6 +706,11 @@ function buildAddSlotForm(dateStr) {
     UI.clearBanner(errorBox);
     const minutes = timeInputToMinutes(timeInput.value);
     const location_id = Number(locationSelect.value);
+    // Same empty-select hazard as the template form: Number('') is 0.
+    if (!(location_id > 0)) {
+      showError(errorBox, I18N.t('schedule_template_no_locations_hint'));
+      return;
+    }
     const startUnix = unixFromBangkokDateTime(dateStr, minutes);
     await UI.withBusy(submit, async () => {
       try {
@@ -688,13 +747,11 @@ function renderSlotRow(dateStr, slot, allSlots) {
       slotActionBtn('tertiary', 'right-left', I18N.t('day_panel_booking_move'),
         () => openMoveModal(dateStr, slot, allSlots)),
       slotActionBtn('destructive', 'xmark', I18N.t('day_panel_booking_cancel'), async (btn) => {
-        const ok = await UI.confirm({
+        await UI.confirmThen(btn, {
           title: I18N.t('day_panel_booking_cancel'),
           message: I18N.t('day_panel_booking_cancel_confirm', { name: slot.booking.booker_name }),
           confirmLabel: I18N.t('day_panel_booking_cancel'),
-        });
-        if (!ok) return;
-        await UI.withBusy(btn, async () => {
+        }, async () => {
           try {
             await Api.adminCancelBooking(slot.booking.id);
             UI.toast('success', I18N.t('day_panel_booking_cancelled'));
@@ -729,13 +786,11 @@ function renderSlotRow(dateStr, slot, allSlots) {
           });
         }),
       slotActionBtn('tertiary', 'trash', I18N.t('day_panel_slot_delete'), async (btn) => {
-        const ok = await UI.confirm({
+        await UI.confirmThen(btn, {
           title: I18N.t('day_panel_slot_delete'),
           message: I18N.t('day_panel_slot_delete_confirm'),
           confirmLabel: I18N.t('common_delete'),
-        });
-        if (!ok) return;
-        await UI.withBusy(btn, async () => {
+        }, async () => {
           try {
             await Api.deleteSlot(slot.id);
             await refreshAfterDayAction();
@@ -767,47 +822,71 @@ function slotActionBtn(kind, icon, label, onClick, showLabel) {
 function openBookingModal({ title, name = '', phone = '', submitLabel, onSubmit }) {
   const nameInput = UI.el('input', {
     class: 'input',
-    attrs: { id: 'bk-name', type: 'text', required: true, autocomplete: 'name' },
+    attrs: { id: 'bk-name', type: 'text', required: true, autocomplete: 'name',
+             maxlength: String(MAX_TEXT_LENGTH) },
   });
   nameInput.value = name;
   const phoneInput = UI.el('input', {
     class: 'input',
-    attrs: { id: 'bk-phone', type: 'tel', inputmode: 'tel', required: true, autocomplete: 'tel' },
+    attrs: { id: 'bk-phone', type: 'tel', inputmode: 'tel', required: true, autocomplete: 'tel',
+             maxlength: '20' },
   });
   phoneInput.value = phone;
 
   const errorBox = UI.el('div');
+  // Per-field errors, matching the booker form. This form previously had none
+  // — and no phone plausibility check either, so a teacher who typed a
+  // nickname into the phone field created a booking the student could never
+  // find via phone lookup and could never self-cancel.
+  const nameError = UI.el('div', { class: 'field-error hidden', attrs: { id: 'bk-name-error' } });
+  const phoneError = UI.el('div', { class: 'field-error hidden', attrs: { id: 'bk-phone-error' } });
+  nameInput.setAttribute('aria-describedby', 'bk-name-error');
+  phoneInput.setAttribute('aria-describedby', 'bk-phone-error');
+
   const submit = UI.el('button', {
     class: 'btn btn-primary btn-block',
     attrs: { type: 'submit' },
   }, [UI.icon('check'), UI.el('span', { text: submitLabel || I18N.t('common_save') })]);
 
-  const form = UI.el('form', { class: 'stack-tight' }, [
+  const form = UI.el('form', { class: 'stack-tight', attrs: { novalidate: true } }, [
     UI.el('div', { class: 'field' }, [
       UI.el('label', { text: I18N.t('booker_form_name'), attrs: { for: 'bk-name' } }),
-      nameInput,
+      nameInput, nameError,
     ]),
     UI.el('div', { class: 'field' }, [
       UI.el('label', { text: I18N.t('booker_form_phone'), attrs: { for: 'bk-phone' } }),
-      phoneInput,
+      phoneInput, phoneError,
     ]),
     submit,
   ]);
 
   const body = UI.el('div', { class: 'stack-tight' }, [errorBox, form]);
-  showModal(title, body);
+  // Bound handle. `closeModal()` closed whatever was on TOP of the stack, so
+  // pressing Escape while this submit was in flight popped this modal and the
+  // resolving request then popped the day panel underneath — after which
+  // refreshAfterDayAction() painted into a detached node, reintroducing the
+  // exact bug the modal stack was built to fix.
+  const handle = showModal(title, body);
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     UI.clearBanner(errorBox);
     const nameValue = nameInput.value.trim();
     const phoneValue = phoneInput.value.trim();
-    if (!nameValue) { nameInput.focus(); return; }
-    if (!phoneValue) { phoneInput.focus(); return; }
+    const nameOk = UI.setFieldError(nameError, nameInput,
+      !nameValue ? I18N.t('booker_form_name_required') : '');
+    const phoneOk = UI.setFieldError(phoneError, phoneInput,
+      !phoneValue ? I18N.t('booker_form_phone_required')
+        : !isPlausiblePhone(phoneValue) ? I18N.t('booker_form_phone_invalid') : '');
+    if (!nameOk || !phoneOk) {
+      (!nameOk ? nameInput : phoneInput).focus();
+      UI.announce(I18N.t('booker_form_check_fields'), true);
+      return;
+    }
     await UI.withBusy(submit, async () => {
       try {
         await onSubmit(nameValue, phoneValue);
-        closeModal();
+        handle.close();
         await refreshAfterDayAction();
       } catch (err) {
         showError(errorBox, err.status === 409 ? I18N.t('booking_conflict') : messageForError(err));
@@ -843,6 +922,9 @@ function openMoveModal(dateStr, slot, allSlots) {
   }
 
   const grid = UI.el('div', { class: 'row-wrap' });
+  // Declared up front because the chip handlers below are wired before the
+  // modal itself is created; they close THIS modal, not whatever is on top.
+  let moveHandle;
   candidates.forEach((c) => {
     const btn = UI.el('button', { class: 'chip tabular-nums', attrs: { type: 'button' } }, [
       UI.icon('clock'),
@@ -852,7 +934,7 @@ function openMoveModal(dateStr, slot, allSlots) {
       await UI.withBusy(btn, async () => {
         try {
           await Api.adminMoveBooking(slot.booking.id, c.id);
-          closeModal();
+          moveHandle.close();
           UI.toast('success', I18N.t('move_modal_moved'));
           await refreshAfterDayAction();
         } catch (err) {
@@ -863,7 +945,7 @@ function openMoveModal(dateStr, slot, allSlots) {
     grid.appendChild(btn);
   });
 
-  showModal(I18N.t('move_modal_title'), UI.el('div', { class: 'stack-tight' }, [
+  moveHandle = showModal(I18N.t('move_modal_title'), UI.el('div', { class: 'stack-tight' }, [
     UI.el('p', { class: 'text-helper', text: I18N.t('move_modal_hint') }),
     grid,
   ]));
@@ -1017,6 +1099,13 @@ els.logOrderToggle.addEventListener('click', () => {
 els.logLoadMore.addEventListener('click', () => loadLog(false));
 
 async function loadLog(reset) {
+  // Newest-request-wins, like the month loads. Without a token, changing the
+  // Type filter twice quickly fired two loadLog(true) calls that BOTH cleared
+  // the array and BOTH concat()ed into it, so the list showed
+  // booked-union-cancelled under a heading claiming one of them — with
+  // STATE.logCursor from whichever landed last, so "Load more" then paged the
+  // wrong query.
+  const token = ++STATE.logToken;
   if (reset) {
     STATE.logEvents = [];
     STATE.logCursor = null;
@@ -1026,15 +1115,17 @@ async function loadLog(reset) {
   try {
     if (btn) UI.busy(btn, true);
     const data = await Api.log({ ...STATE.logFilters, cursor: STATE.logCursor || undefined });
+    if (token !== STATE.logToken) return;
     STATE.logEvents = STATE.logEvents.concat(data.events || []);
     STATE.logCursor = data.next_cursor;
     els.logLoadMore.classList.toggle('hidden', !STATE.logCursor);
     renderLog();
   } catch (err) {
+    if (token !== STATE.logToken) return;
     showError(els.logList, err);
   } finally {
     if (btn) UI.busy(btn, false);
-    UI.doneLoading(els.logList);
+    if (token === STATE.logToken) UI.doneLoading(els.logList);
   }
 }
 
@@ -1102,28 +1193,28 @@ els.shareCopyBtn.addEventListener('click', async () => {
 
 // Both slug changes break every link the teacher has already given out, so
 // both go through the same explicit confirmation.
-async function confirmSlugChange() {
-  return UI.confirm({
-    title: I18N.t('settings_slug_confirm_title'),
-    message: I18N.t('settings_slug_confirm_body'),
-    confirmLabel: I18N.t('common_confirm'),
-    icon: 'link',
-  });
-}
+const SLUG_CONFIRM = () => ({
+  title: I18N.t('settings_slug_confirm_title'),
+  message: I18N.t('settings_slug_confirm_body'),
+  confirmLabel: I18N.t('common_confirm'),
+  icon: 'link',
+});
 
 els.slugForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   setFieldMessage(els.slugError, '');
   const slug = els.slugInput.value.trim();
-  if (!/^[a-z0-9-]{3,32}$/.test(slug)) {
+  if (!SLUG_RE.test(slug)) {
     els.slugInput.setAttribute('aria-invalid', 'true');
     setFieldMessage(els.slugError, I18N.t('settings_slug_invalid'));
     els.slugInput.focus();
     return;
   }
   els.slugInput.setAttribute('aria-invalid', 'false');
-  if (!await confirmSlugChange()) return;
-  await UI.withBusy(els.slugSubmit, async () => {
+  // Double-tapping Save used to stack two confirms and fire two PATCHes; the
+  // second came back 409, telling the teacher the link was "already taken"
+  // when they had just taken it themselves.
+  await UI.confirmThen(els.slugSubmit, SLUG_CONFIRM(), async () => {
     try {
       const result = await Api.setSlug(slug);
       STATE.admin.slug = result.slug;
@@ -1139,8 +1230,7 @@ els.slugForm.addEventListener('submit', async (e) => {
 });
 
 els.slugRegenerateBtn.addEventListener('click', async () => {
-  if (!await confirmSlugChange()) return;
-  await UI.withBusy(els.slugRegenerateBtn, async () => {
+  await UI.confirmThen(els.slugRegenerateBtn, SLUG_CONFIRM(), async () => {
     try {
       const result = await Api.regenerateSlug();
       STATE.admin.slug = result.slug;
@@ -1156,13 +1246,15 @@ els.slugRegenerateBtn.addEventListener('click', async () => {
 // to the fresh-admin state. Bookings survive — their slots are
 // re-pointed at the default location, which the confirm says.
 els.settingsResetBtn.addEventListener('click', async () => {
-  if (!await UI.confirm({
+  // Double-tapping this used to stack two confirm sheets and, if both were
+  // accepted, run the reset twice — regenerating the slug a second time and
+  // killing the link the teacher had just copied.
+  await UI.confirmThen(els.settingsResetBtn, {
     title: I18N.t('settings_reset_confirm_title'),
     message: I18N.t('settings_reset_confirm_body'),
     confirmLabel: I18N.t('settings_reset_btn'),
     icon: 'triangle-exclamation',
-  })) return;
-  await UI.withBusy(els.settingsResetBtn, async () => {
+  }, async () => {
     try {
       const result = await Api.resetSettings();
       STATE.admin.slug = result.slug;
@@ -1181,19 +1273,23 @@ els.settingsResetBtn.addEventListener('click', async () => {
 
 async function init() {
   I18N.apply();
-  els.adminLocationFilter.setAttribute('aria-label', I18N.t('calendar_filter_all_locations'));
+  els.adminLocationFilter.setAttribute('aria-label', I18N.t('calendar_filter_location_label'));
+  // An expired session used to leave the teacher in a dead UI: every action
+  // toasted "Please log in again" with no form to go back to.
+  Api.onUnauthorized(() => {
+    showLogin();
+    UI.toastError(I18N.t('error_unauthorized'));
+  });
   try {
-    await afterLogin();
+    // allowUnauthorized: this probe's 401 just means "not signed in yet",
+    // which must not be reported as an expired session.
+    await afterLogin({ allowUnauthorized: true });
   } catch (err) {
     showLogin();
     // A 401 just means "not signed in yet" and needs no error message; only
     // a real failure does.
     if (err.status !== 401) {
-      els.loginError.replaceChildren(
-        UI.icon('circle-exclamation'),
-        UI.el('span', { text: I18N.t('common_error_network') })
-      );
-      els.loginError.classList.remove('hidden');
+      setFieldMessage(els.loginError, I18N.t('common_error_network'));
     }
   }
 }

@@ -5,12 +5,44 @@ import { createClient } from '@libsql/client';
 
 let client;
 
-const WRITE_SQL = /^(INSERT|UPDATE|DELETE|REPLACE|CREATE|DROP|ALTER)\b/i;
+// Anything that is not a pure read has to take the FK-disabled path below.
+// Testing for a *read* rather than listing every write keyword fails safe:
+// the old `/^(INSERT|UPDATE|…)/` inspected only the leading keyword, so a
+// write phrased as `WITH recent AS (…) INSERT INTO …`, or one preceded by a
+// comment, was classified as a read and sent down the FK-enforced path —
+// where it would throw SQLITE_CONSTRAINT on exactly the dangling-slot_id
+// cases this shim exists to permit. Now an unrecognised statement is treated
+// as a write, which is merely redundant rather than broken.
+const READ_SQL = /^(SELECT|WITH\s+[\s\S]*?\)\s*SELECT|PRAGMA|EXPLAIN)\b/i;
 
 function statementSql(stmt) {
   if (typeof stmt === 'string') return stmt;
   if (Array.isArray(stmt)) return stmt[0];
   return stmt?.sql ?? '';
+}
+
+// Leading line/block comments would otherwise defeat the keyword test.
+function stripLeadingComments(sql) {
+  let s = String(sql).trim();
+  for (;;) {
+    if (s.startsWith('--')) {
+      const nl = s.indexOf('\n');
+      if (nl === -1) return '';
+      s = s.slice(nl + 1).trim();
+      continue;
+    }
+    if (s.startsWith('/*')) {
+      const close = s.indexOf('*/');
+      if (close === -1) return '';
+      s = s.slice(close + 2).trim();
+      continue;
+    }
+    return s;
+  }
+}
+
+function isReadOnlySql(stmt) {
+  return READ_SQL.test(stripLeadingComments(statementSql(stmt)));
 }
 
 export function getDb() {
@@ -32,7 +64,7 @@ export function getDb() {
     // bookings with a dangling slot_id; without this those DELETEs 500
     // with SQLITE_CONSTRAINT.
     raw.execute = async (stmt, args) => {
-      if (!WRITE_SQL.test(statementSql(stmt).trim())) {
+      if (isReadOnlySql(stmt)) {
         return origExecute(stmt, args);
       }
       const normalized = typeof stmt === 'string'

@@ -1,18 +1,14 @@
 import { getDb } from '../../_lib/db.js';
-import { bangkokDateString, bangkokDayBounds, unixFromBangkokDateTime } from '../../_lib/time.js';
-
-const MONTH_RE = /^\d{4}-\d{2}$/;
-const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
-
-function monthBounds(monthStr) {
-  const [y, m] = monthStr.split('-').map(Number);
-  const nextY = m === 12 ? y + 1 : y;
-  const nextM = m === 12 ? 1 : m + 1;
-  return {
-    start: unixFromBangkokDateTime(`${monthStr}-01`, 0, 0),
-    end: unixFromBangkokDateTime(`${nextY}-${String(nextM).padStart(2, '0')}-01`, 0, 0),
-  };
-}
+import { badRequest, conflictOrMissing } from '../../_lib/respond.js';
+import {
+  bangkokDateString,
+  bangkokDayBounds,
+  bangkokMonthBounds,
+  isValidDateString,
+  isValidMonthString,
+  nowUnix,
+} from '../../_lib/time.js';
+import { isId, isSlotStart, optionalIdParam, INVALID } from '../../_lib/validate.js';
 
 // Month summary (availability + booking counts per day, for the admin's
 // month-view review) and day detail (every slot with its booking, if any)
@@ -22,12 +18,16 @@ export async function listSlots(req, res) {
   const db = getDb();
 
   if (typeof req.query?.day === 'string') {
-    if (!DAY_RE.test(req.query.day)) {
-      res.status(400).json({ error: 'invalid_request' });
+    if (!isValidDateString(req.query.day)) {
+      res.status(400).json({ error: 'invalid_date' });
       return;
     }
     const { start, end } = bangkokDayBounds(req.query.day);
-    const locationId = req.query?.location_id ? Number(req.query.location_id) : null;
+    const locationId = optionalIdParam(req.query?.location_id);
+    if (locationId === INVALID) {
+      badRequest(res);
+      return;
+    }
     const result = await db.execute({
       sql: `SELECT s.id, s.start_unix, s.source, s.blocked, s.location_id, l.title AS location_title,
                    b.id AS booking_id, b.booker_name, b.booker_phone
@@ -55,12 +55,16 @@ export async function listSlots(req, res) {
   }
 
   if (typeof req.query?.month === 'string') {
-    if (!MONTH_RE.test(req.query.month)) {
-      res.status(400).json({ error: 'invalid_request' });
+    if (!isValidMonthString(req.query.month)) {
+      res.status(400).json({ error: 'invalid_date' });
       return;
     }
-    const { start, end } = monthBounds(req.query.month);
-    const locationId = req.query?.location_id ? Number(req.query.location_id) : null;
+    const { start, end } = bangkokMonthBounds(req.query.month);
+    const locationId = optionalIdParam(req.query?.location_id);
+    if (locationId === INVALID) {
+      badRequest(res);
+      return;
+    }
     const result = await db.execute({
       sql: `SELECT s.start_unix, s.blocked, b.id AS booking_id
               FROM slots s
@@ -82,7 +86,7 @@ export async function listSlots(req, res) {
     return;
   }
 
-  res.status(400).json({ error: 'invalid_request' });
+  badRequest(res);
 }
 
 // Adds a single slot outside the template (source='override'). Blocking an
@@ -90,11 +94,13 @@ export async function listSlots(req, res) {
 export async function addOverrideSlot(req, res) {
   const { start_unix, blocked, location_id } = req.body ?? {};
   const locationId = Number(location_id);
-  if (!Number.isInteger(start_unix) || !Number.isInteger(locationId)) {
-    res.status(400).json({ error: 'invalid_request' });
+  // `blocked` was accepted as any truthy value here while updateSlot required
+  // a real boolean — normalised to updateSlot's stricter rule.
+  if (!isSlotStart(start_unix) || !isId(locationId) || (blocked !== undefined && typeof blocked !== 'boolean')) {
+    badRequest(res);
     return;
   }
-  const now = Math.floor(Date.now() / 1000);
+  const now = nowUnix();
   if (start_unix <= now) {
     res.status(400).json({ error: 'in_past' });
     return;
@@ -124,8 +130,8 @@ export async function addOverrideSlot(req, res) {
 export async function updateSlot(req, res, params) {
   const id = Number(params.id);
   const { blocked } = req.body ?? {};
-  if (!Number.isInteger(id) || typeof blocked !== 'boolean') {
-    res.status(400).json({ error: 'invalid_request' });
+  if (!isId(id) || typeof blocked !== 'boolean') {
+    badRequest(res);
     return;
   }
   const db = getDb();
@@ -144,8 +150,8 @@ export async function updateSlot(req, res, params) {
 // here, not just as a UI confirm (plan.md Key flows §2).
 export async function deleteSlot(req, res, params) {
   const id = Number(params.id);
-  if (!Number.isInteger(id)) {
-    res.status(400).json({ error: 'invalid_request' });
+  if (!isId(id)) {
+    badRequest(res);
     return;
   }
   const db = getDb();
@@ -156,11 +162,9 @@ export async function deleteSlot(req, res, params) {
     args: [id, req.adminId, id],
   });
   if (result.rowsAffected === 0) {
-    const exists = await db.execute({
-      sql: 'SELECT 1 FROM slots WHERE id = ? AND admin_id = ?',
-      args: [id, req.adminId],
+    await conflictOrMissing(res, db, {
+      table: 'slots', id, adminId: req.adminId, conflictCode: 'slot_booked',
     });
-    res.status(exists.rows[0] ? 409 : 404).json({ error: exists.rows[0] ? 'slot_booked' : 'not_found' });
     return;
   }
   res.status(200).json({ ok: true });

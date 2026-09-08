@@ -15,6 +15,9 @@ const STATE = {
   openDay: null,
   // Rapid month paging fires overlapping requests; only the newest may paint.
   monthToken: 0,
+  // The last month load's failure, if any. Held so a language toggle can
+  // repaint the error rather than replacing it with a false "no availability".
+  monthError: null,
   // Lets a language toggle re-render whatever modal is currently open,
   // instead of leaving it stranded in the previous language.
   reopenModal: null,
@@ -40,7 +43,14 @@ const els = {
 
 mountLangToggle(document.getElementById('lang-toggle'));
 document.addEventListener('i18n:changed', () => {
-  renderCalendar();
+  // renderCalendar() unconditionally would wipe a failed month's error banner
+  // and Retry button, and — because STATE.monthDays is still {} after a
+  // failure — replace them with "No open slots this month. Try the next
+  // month, or ask your teacher directly." A student whose connection dropped
+  // and who then toggled the language was told, falsely and with authority,
+  // that the teacher has no availability.
+  if (STATE.monthError) renderMonthError(STATE.monthError);
+  else renderCalendar();
   renderLocalBookings();
   renderLocationFilterBar();
   els.locationFilter.setAttribute('aria-label', I18N.t('booker_location_filter_label'));
@@ -56,7 +66,12 @@ const tabs = UI.wireTabs(
   { book: els.tabBook, history: els.tabHistory },
   (tab) => {
     STATE.activeTab = tab;
-    if (tab === 'history') renderLocalBookings();
+    if (tab === 'history') {
+      // Paint the cache immediately, then correct it against the server —
+      // the cached copy can be stale by a move or a cancellation.
+      renderLocalBookings();
+      reconcileLocalBookings();
+    }
   }
 );
 function setTab(tab) { tabs.select(tab); }
@@ -162,30 +177,40 @@ async function loadMonth(quiet) {
       els.brand.textContent = STATE.displayName;
       document.title = `${STATE.displayName} — ${I18N.t('app_name')}`;
     }
+    STATE.monthError = null;
     renderCalendar();
   } catch (err) {
     if (token !== STATE.monthToken) return;
     if (err.status === 404) { showNotFound(); return; }
-    // Keep the month nav and offer a way out, rather than clearing the
-    // container and stranding the student on a dead month.
-    const retry = UI.button({
-      kind: 'secondary', icon: 'rotate-right',
-      label: I18N.t('common_retry'),
-      onClick: () => loadMonth(),
-    });
-    cal.renderMessage(STATE.month, UI.el('div', { class: 'stack' }, [
-      UI.banner(UI.messageForError(err), 'error'),
-      UI.el('div', { class: 'form-row' }, [retry]),
-    ]));
+    STATE.monthError = err;
+    renderMonthError(err);
     UI.announce(UI.messageForError(err), true);
   } finally {
     if (token === STATE.monthToken) els.calendar.removeAttribute('aria-busy');
   }
 }
 
+// Keeps the month nav and offers a way out, rather than clearing the
+// container and stranding the student on a dead month. Split out of
+// loadMonth's catch so the language toggle can repaint it (see i18n:changed).
+function renderMonthError(err) {
+  const retry = UI.button({
+    kind: 'secondary', icon: 'rotate-right',
+    label: I18N.t('common_retry'),
+    onClick: () => loadMonth(),
+  });
+  cal.renderMessage(STATE.month, UI.el('div', { class: 'stack' }, [
+    UI.banner(UI.messageForError(err), 'error'),
+    UI.el('div', { class: 'form-row' }, [retry]),
+  ]));
+}
+
 function showNotFound() {
   els.notFound.classList.remove('hidden');
   els.appBody.classList.add('hidden');
+  // Revealing a role="alert" that was already in the DOM does not reliably
+  // announce; say it explicitly.
+  UI.announce(I18N.t('booker_teacher_not_found'), true);
 }
 
 // ── Day slots modal ────────────────────────────────────────
@@ -247,13 +272,9 @@ function renderDaySlots(body, dateStr, slots) {
 // ── Booking form modal ─────────────────────────────────────
 
 // Thai mobile numbers are 9-10 digits; international entries carry a +.
-// canonicalizePhone() on the server strips non-digits and never rejects, so
-// without this check "abc" books successfully and the student can then never
-// look the booking up or cancel it.
-function isPlausiblePhone(value) {
-  const digits = value.replace(/\D/g, '');
-  return digits.length >= 9 && digits.length <= 15;
-}
+// isPlausiblePhone now lives in shared/validate.js, so the admin booking
+// form applies the same rule (it previously checked presence only) and the
+// bounds stay aligned with api/_lib/phone.js.
 
 function openBookingForm(dateStr, slot) {
   STATE.reopenModal = () => openBookingForm(dateStr, slot);
@@ -263,7 +284,12 @@ function openBookingForm(dateStr, slot) {
 
   const nameInput = UI.el('input', {
     class: 'input',
+    // maxlength mirrors MAX_TEXT in api/_lib/validate.js. Neither booking
+    // name input had one and the server had no cap either, so a pasted 100 KB
+    // name was stored and then rendered into the calendar, day panel,
+    // notifications and log.
     attrs: { id: 'bf-name', type: 'text', required: true, autocomplete: 'name',
+             maxlength: String(MAX_TEXT_LENGTH),
              'aria-describedby': 'bf-name-error' },
   });
   nameInput.value = last.booker_name || '';
@@ -271,7 +297,8 @@ function openBookingForm(dateStr, slot) {
   const phoneInput = UI.el('input', {
     class: 'input',
     attrs: { id: 'bf-phone', type: 'tel', required: true, autocomplete: 'tel',
-             inputmode: 'tel', 'aria-describedby': 'bf-phone-error bf-phone-hint' },
+             inputmode: 'tel', maxlength: '20',
+             'aria-describedby': 'bf-phone-error bf-phone-hint' },
   });
   phoneInput.value = last.booker_phone || '';
 
@@ -324,15 +351,8 @@ function openBookingForm(dateStr, slot) {
     backLabel: I18N.t('booker_form_back'),
   });
 
-  function setFieldError(input, errorEl, message) {
-    const bad = !!message;
-    input.setAttribute('aria-invalid', String(bad));
-    errorEl.replaceChildren();
-    errorEl.classList.toggle('hidden', !bad);
-    if (bad) errorEl.append(UI.icon('circle-exclamation'), UI.el('span', { text: message }));
-    return !bad;
-  }
-
+  // setFieldError now lives in shared/ui.js — this was one of three drifted
+  // copies. Note the argument order there is (errorEl, input, message).
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     UI.clearBanner(errorBox);
@@ -340,8 +360,8 @@ function openBookingForm(dateStr, slot) {
     const name = nameInput.value.trim();
     const phone = phoneInput.value.trim();
 
-    const nameOk = setFieldError(nameInput, nameError, name ? '' : I18N.t('booker_form_name_required'));
-    const phoneOk = setFieldError(phoneInput, phoneError,
+    const nameOk = UI.setFieldError(nameError, nameInput, name ? '' : I18N.t('booker_form_name_required'));
+    const phoneOk = UI.setFieldError(phoneError, phoneInput,
       !phone ? I18N.t('booker_form_phone_required')
         : !isPlausiblePhone(phone) ? I18N.t('booker_form_phone_invalid') : '');
 
@@ -409,23 +429,85 @@ function showSuccessModal(dateStr, slot) {
 function lsKey() { return `suvida_v1_bookings_${STATE.slug}`; }
 
 function loadLocalBookings() {
-  try { return JSON.parse(localStorage.getItem(lsKey()) || '[]'); } catch { return []; }
+  try {
+    const parsed = JSON.parse(localStorage.getItem(lsKey()) || '[]');
+    // A corrupted key holding `null` or `{}` parses fine, and the callers
+    // then call .sort()/.push()/.slice() on it and throw.
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
 }
 
+// Reads were already guarded; writes were not. This one runs immediately
+// AFTER the booking has succeeded on the server, so a storage failure here
+// (iOS Safari with storage full or disabled throws QuotaExceededError /
+// SecurityError) used to escape into the submit handler's catch, where
+// messageForError() saw a DOMException with no .status and no .body and told
+// the student "Something went wrong. Please try again." for a booking that
+// had actually worked — so they booked a second slot. The cache is a
+// convenience; failing to write it must never look like a failed booking.
 function saveLocalBooking(entry) {
-  const list = loadLocalBookings();
-  list.push(entry);
-  localStorage.setItem(lsKey(), JSON.stringify(list));
+  try {
+    const list = loadLocalBookings();
+    list.push(entry);
+    localStorage.setItem(lsKey(), JSON.stringify(list));
+  } catch {
+    // Non-fatal: "Booked from this device" just won't list it. The
+    // phone-lookup tab still finds it, because that path is server-backed.
+  }
 }
 
 function removeLocalBooking(id) {
-  const list = loadLocalBookings().filter((b) => b.id !== id);
-  localStorage.setItem(lsKey(), JSON.stringify(list));
+  try {
+    const list = loadLocalBookings().filter((b) => b.id !== id);
+    localStorage.setItem(lsKey(), JSON.stringify(list));
+  } catch {
+    // Non-fatal, as above.
+  }
 }
 
 function canCancelClient(startUnix) {
   const now = Math.floor(Date.now() / 1000);
   return startUnix - now >= 86400;
+}
+
+// Reconciles the localStorage cache against the server, then repaints.
+//
+// The cache is written once at booking time and was never checked again, so
+// if the teacher moved the lesson from 10:00 to 14:00 this list showed 10:00
+// forever — with an enabled Cancel button — and the student turned up at the
+// wrong time. If the teacher cancelled it, the row never disappeared and
+// Cancel produced an error toast the student could do nothing about.
+//
+// The phone-lookup path is already server-backed and correct; this reuses it.
+// Best-effort: a failed lookup just leaves the cached view in place.
+async function reconcileLocalBookings() {
+  const cached = loadLocalBookings();
+  if (cached.length === 0) return;
+  // Every entry from this device shares the phone it was booked with.
+  const phone = cached[cached.length - 1].booker_phone;
+  if (!phone) return;
+  let live;
+  try {
+    const data = await Api.publicHistory(STATE.slug, phone);
+    live = data.bookings || [];
+  } catch {
+    return; // offline or rate-limited — keep showing what we have
+  }
+  const byId = new Map(live.map((b) => [b.id, b]));
+  const reconciled = cached
+    // Anything the server no longer lists as active was cancelled or has
+    // passed; either way it does not belong in "upcoming".
+    .filter((b) => byId.has(b.id))
+    // Take the server's time and location, not the ones cached at booking.
+    .map((b) => ({ ...b, ...byId.get(b.id) }));
+  try {
+    localStorage.setItem(lsKey(), JSON.stringify(reconciled));
+  } catch {
+    // Non-fatal; the in-memory render below is still correct.
+  }
+  renderLocalBookings();
 }
 
 function renderLocalBookings() {
@@ -469,13 +551,11 @@ function renderBookingRow(booking, phone, onCancelled) {
   ]);
 
   btn.addEventListener('click', async () => {
-    const ok = await UI.confirm({
+    await UI.confirmThen(btn, {
       title: I18N.t('booker_history_cancel_btn'),
       message: I18N.t('booker_history_cancel_confirm'),
       confirmLabel: I18N.t('booker_history_cancel_btn'),
-    });
-    if (!ok) return;
-    await UI.withBusy(btn, async () => {
+    }, async () => {
       try {
         await Api.publicCancel(STATE.slug, booking.id, phone);
         onCancelled(booking.id);

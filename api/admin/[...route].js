@@ -1,7 +1,9 @@
 import { createRouter, pathFromRequest } from '../_lib/router.js';
+import { withErrorBoundary, noStore } from '../_lib/handler.js';
 import { getDb } from '../_lib/db.js';
 import { verifySession, getSessionToken } from '../_lib/auth.js';
-import { adminLogin } from '../_routes/admin/login.js';
+import { adminLogin } from '../_routes/login.js';
+import { logout } from '../_routes/logout.js';
 import { getMe } from '../_routes/admin/me.js';
 import { setSlug, regenerateSlug } from '../_routes/admin/slug.js';
 import { resetSettings } from '../_routes/admin/settings.js';
@@ -16,6 +18,7 @@ import { listLog } from '../_routes/admin/log.js';
 const router = createRouter();
 
 router.add('POST', '/login', adminLogin);
+router.add('POST', '/logout', logout);
 router.add('GET', '/me', getMe);
 router.add('PATCH', '/slug', setSlug);
 router.add('POST', '/slug/regenerate', regenerateSlug);
@@ -43,13 +46,15 @@ router.add('GET', '/notifications', getNotifications);
 router.add('POST', '/notifications/seen', markSeen);
 router.add('GET', '/log', listLog);
 
-const PUBLIC_PATHS = new Set(['/login']);
+const PUBLIC_PATHS = new Set(['/login', '/logout']);
 
 // Tenant scoping lives here, not in each handler: the session is resolved
 // once, non-admin roles are rejected, and admin_id is attached to req so
 // no handler can forget to scope its query — see plan.md "Architecture".
-export default async function handler(req, res) {
+export default withErrorBoundary(async function handler(req, res) {
   const path = pathFromRequest(req, '/api/admin');
+  // Every response on this surface is per-tenant and most carry student PII.
+  noStore(res);
 
   if (!PUBLIC_PATHS.has(path)) {
     const db = getDb();
@@ -62,4 +67,4 @@ export default async function handler(req, res) {
   }
 
   await router.dispatch(req, res, path);
-}
+});

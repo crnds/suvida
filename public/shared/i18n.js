@@ -61,6 +61,12 @@ const DICT = {
     common_load_more: 'โหลดเพิ่มเติม',
     common_retry: 'ลองใหม่',
     a11y_skip_to_content: 'ข้ามไปยังเนื้อหาหลัก',
+    a11y_sections: 'ส่วนต่าง ๆ',
+    a11y_admin_sections: 'ส่วนต่าง ๆ สำหรับครู',
+    a11y_legend: 'คำอธิบายสัญลักษณ์',
+    a11y_language: 'ภาษา',
+    title_admin: 'สำหรับครู — Suvida Piano Studio',
+    title_owner: 'ผู้ดูแลระบบ — Suvida Piano Studio',
 
     // Booker page
     booker_tab_book: 'จองเวลาเรียน',
@@ -79,7 +85,7 @@ const DICT = {
     booker_form_submit: 'ยืนยันการจอง',
     booker_form_name_required: 'กรุณากรอกชื่อ',
     booker_form_phone_required: 'กรุณากรอกเบอร์โทรศัพท์',
-    booker_form_phone_invalid: 'เบอร์โทรศัพท์ไม่ถูกต้อง กรุณากรอกให้ครบ 9-10 หลัก',
+    booker_form_phone_invalid: 'เบอร์โทรศัพท์ไม่ถูกต้อง กรุณากรอกตัวเลข 9-15 หลัก',
     booker_form_phone_hint: 'ใช้เบอร์นี้สำหรับค้นหาและยกเลิกการจองภายหลัง',
     booker_form_check_fields: 'กรุณาตรวจสอบข้อมูลที่กรอก',
     booker_form_back: 'เลือกเวลาอื่น',
@@ -140,6 +146,7 @@ const DICT = {
     calendar_legend_free: 'ว่าง', calendar_legend_booked: 'จองแล้ว', calendar_legend_blocked: 'ปิดรับ',
     calendar_count_free: 'ว่าง {n}', calendar_count_booked: 'จอง {n}', calendar_count_blocked: 'ปิด {n}',
     calendar_filter_all_locations: 'ทุกสถานที่',
+    calendar_filter_location_label: 'กรองตามสถานที่',
     day_panel_title: 'รายละเอียดวันที่ {date}',
     day_panel_empty: 'วันนี้ไม่มีคิวเลย',
     day_panel_add_slot: 'เพิ่มช่วงเวลานอกตาราง',
@@ -235,7 +242,6 @@ const DICT = {
     owner_admin_deleted: 'ลบบัญชีแล้ว',
     owner_admin_password_hint: 'เว้นว่างไว้หากไม่ต้องการเปลี่ยนรหัสผ่าน',
 
-    landing_title: 'Suvida Piano Studio',
     landing_body: 'นักเรียนจองผ่านลิงก์เฉพาะของครูแต่ละท่าน — กรุณาสอบถามลิงก์จากครูผู้สอนของคุณ',
     landing_teacher_login: 'เข้าสู่ระบบสำหรับครู',
     landing_owner_login: 'เข้าสู่ระบบสำหรับผู้ดูแล',
@@ -252,6 +258,15 @@ const DICT = {
     error_invalid_location: 'ไม่พบสถานที่ที่เลือก',
     error_location_in_use: 'ลบไม่ได้ เพราะยังมีตารางหรือคิวที่ใช้สถานที่นี้อยู่',
     error_slug_taken: 'ลิงก์นี้มีผู้ใช้แล้ว กรุณาเลือกใหม่',
+    error_invalid_slug: 'ลิงก์ไม่ถูกต้อง ใช้ได้เฉพาะ a-z 0-9 และ - ความยาว 3-32 ตัวอักษร',
+    error_slot_exists: 'มีช่วงเวลานี้อยู่แล้ว',
+    error_slot_booked: 'ลบไม่ได้ เพราะมีคิวจองอยู่ กรุณายกเลิกคิวก่อน',
+    error_move_unavailable: 'ย้ายไม่ได้ เพราะเวลานั้นไม่ว่างแล้ว',
+    error_booking_cancelled: 'คิวนี้ถูกยกเลิกไปแล้ว',
+    error_in_past: 'เวลานี้ผ่านไปแล้ว กรุณาเลือกเวลาในอนาคต',
+    error_invalid_date: 'วันที่ไม่ถูกต้อง',
+    error_entry_exists: 'มีรายการนี้ในตารางประจำสัปดาห์แล้ว',
+    error_username_taken: 'ชื่อผู้ใช้นี้มีอยู่แล้ว',
   },
 
   en: {
@@ -298,6 +313,12 @@ const DICT = {
     common_load_more: 'Load more',
     common_retry: 'Retry',
     a11y_skip_to_content: 'Skip to main content',
+    a11y_sections: 'Sections',
+    a11y_admin_sections: 'Admin sections',
+    a11y_legend: 'Legend',
+    a11y_language: 'Language',
+    title_admin: 'Teacher — Suvida Piano Studio',
+    title_owner: 'Owner — Suvida Piano Studio',
 
     booker_tab_book: 'Book a lesson',
     booker_tab_history: 'My bookings',
@@ -315,7 +336,7 @@ const DICT = {
     booker_form_submit: 'Confirm booking',
     booker_form_name_required: 'Please enter a name',
     booker_form_phone_required: 'Please enter a phone number',
-    booker_form_phone_invalid: "That doesn't look like a phone number — please enter 9-10 digits",
+    booker_form_phone_invalid: "That doesn't look like a phone number — please enter 9-15 digits",
     booker_form_phone_hint: "You'll use this number to find or cancel the booking later",
     booker_form_check_fields: 'Please check the highlighted fields',
     booker_form_back: 'Pick a different time',
@@ -373,6 +394,7 @@ const DICT = {
     calendar_legend_free: 'Free', calendar_legend_booked: 'Booked', calendar_legend_blocked: 'Blocked',
     calendar_count_free: '{n} free', calendar_count_booked: '{n} booked', calendar_count_blocked: '{n} blocked',
     calendar_filter_all_locations: 'All locations',
+    calendar_filter_location_label: 'Filter by location',
     day_panel_title: 'Details for {date}',
     day_panel_empty: 'No slots on this day',
     day_panel_add_slot: 'Add slot outside template',
@@ -464,7 +486,6 @@ const DICT = {
     owner_admin_deleted: 'Account deleted',
     owner_admin_password_hint: 'Leave blank to keep the current password',
 
-    landing_title: 'Suvida Piano Studio',
     landing_body: "Students book through their teacher's own link — ask your teacher for theirs.",
     landing_teacher_login: 'Teacher login',
     landing_owner_login: 'Owner login',
@@ -479,17 +500,53 @@ const DICT = {
     error_invalid_location: 'That location could not be found',
     error_location_in_use: 'This location is still used by a schedule or booking, so it cannot be deleted.',
     error_slug_taken: 'That link is already taken. Please choose another.',
+    error_invalid_slug: 'Links can use a-z, 0-9 and - only, 3-32 characters.',
+    error_slot_exists: 'That time already exists.',
+    error_slot_booked: 'This time has a booking, so it cannot be deleted. Cancel the booking first.',
+    error_move_unavailable: 'That time is no longer free, so the lesson could not be moved.',
+    error_booking_cancelled: 'This booking has already been cancelled.',
+    error_in_past: 'That time has already passed. Please choose a future time.',
+    error_invalid_date: 'That date is not valid.',
+    error_entry_exists: 'That time is already in the weekly schedule.',
+    error_username_taken: 'That username is already taken.',
   },
 };
 
+// localStorage throws SecurityError in a sandboxed iframe or with site data
+// blocked. This module is loaded before every app script, so an unguarded
+// access here killed i18n.js at parse time and took every page on the site
+// with it (format.js, ui.js and all three app scripts depend on I18N).
+function storageGet(key) {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+function storageSet(key, value) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // Non-fatal: the language just won't persist across reloads.
+  }
+}
+
 const I18N = {
-  lang: localStorage.getItem(I18N_STORAGE_KEY) || 'th',
+  lang: storageGet(I18N_STORAGE_KEY) || 'th',
 
   t(key, vars) {
     const dict = DICT[I18N.lang] || DICT.th;
     let str = dict[key] ?? DICT.th[key] ?? key;
     if (vars) {
-      for (const k in vars) str = str.replace(`{${k}}`, vars[k]);
+      // Function replacement, not a string one. String.replace interprets
+      // `$&`, `` $` ``, `$'` and `$1` in the *replacement*, so a student named
+      // `$&` turned "{name} booked {time}" into "{name} booked 10:00", and a
+      // location titled `$'` made the delete confirmation stop naming what it
+      // was about to delete. Every interpolated key carries user data.
+      for (const k in vars) {
+        const value = vars[k];
+        str = str.split(`{${k}}`).join(String(value ?? ''));
+      }
     }
     return str;
   },
@@ -497,7 +554,7 @@ const I18N = {
   setLang(lang) {
     if (lang !== 'th' && lang !== 'en') return;
     I18N.lang = lang;
-    localStorage.setItem(I18N_STORAGE_KEY, lang);
+    storageSet(I18N_STORAGE_KEY, lang);
     document.documentElement.lang = lang;
     I18N.apply();
     document.dispatchEvent(new CustomEvent('i18n:changed', { detail: { lang } }));
@@ -514,6 +571,11 @@ const I18N = {
     scope.querySelectorAll('[data-i18n-aria-label]').forEach((el) => {
       el.setAttribute('aria-label', I18N.t(el.getAttribute('data-i18n-aria-label')));
     });
+    // The document title was hardcoded English on all four pages and there
+    // was no mechanism to translate it. Pages that set their own title from
+    // data (the booker uses the teacher's name) simply omit the attribute.
+    const titleEl = document.querySelector('title[data-i18n]');
+    if (titleEl) titleEl.textContent = I18N.t(titleEl.getAttribute('data-i18n'));
   },
 
   weekdayShort(idx) { return I18N.t(`weekday_short_${idx}`); },
@@ -532,7 +594,8 @@ function mountLangToggle(container) {
   const wrap = document.createElement('div');
   wrap.className = 'chip-group';
   wrap.setAttribute('role', 'group');
-  wrap.setAttribute('aria-label', 'Language');
+  // Was hardcoded English, so a Thai screen-reader user heard "Language".
+  wrap.setAttribute('aria-label', I18N.t('a11y_language'));
 
   const thBtn = document.createElement('button');
   thBtn.type = 'button';

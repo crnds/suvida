@@ -104,6 +104,19 @@ CREATE INDEX IF NOT EXISTS ix_bookings_admin    ON bookings(admin_id, cancelled_
 CREATE INDEX IF NOT EXISTS ix_events_admin_id   ON booking_events(admin_id, id);
 CREATE INDEX IF NOT EXISTS ix_events_booking    ON booking_events(booking_id);
 
+-- Housekeeping and lookup paths that were full scans.
+-- rate_limits(window_start) is the hottest: api/_lib/ratelimit.js prunes on
+-- EVERY rate-limited request. sessions(expires_at) is pruned on every login
+-- (api/_lib/auth.js) and sessions(admin_id) is swept on admin delete and on
+-- password change. The two location_id indexes serve the "is this location
+-- still in use?" guard in api/_routes/admin/locations.js, which scans the
+-- slots table — the one table here that grows without bound.
+CREATE INDEX IF NOT EXISTS ix_rate_limits_window ON rate_limits(window_start);
+CREATE INDEX IF NOT EXISTS ix_sessions_expires   ON sessions(expires_at);
+CREATE INDEX IF NOT EXISTS ix_sessions_admin     ON sessions(admin_id);
+CREATE INDEX IF NOT EXISTS ix_slots_location     ON slots(location_id);
+CREATE INDEX IF NOT EXISTS ix_templates_location ON templates(location_id);
+
 -- Events are written by triggers, not application code: the public booking
 -- write is a conditional INSERT ... SELECT that may insert zero rows, and
 -- last_insert_rowid() still holds the *previous* row's id after a no-op

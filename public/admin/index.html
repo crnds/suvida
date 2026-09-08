@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#fbf9f6">
-<title>Suvida — Admin</title>
+<title data-i18n="title_admin">Suvida — Admin</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+Thai:wght@400;500&family=Noto+Sans+Thai:wght@400;500;600&display=swap" rel="stylesheet">
@@ -32,7 +32,7 @@
   <section id="login-section" class="hidden panel--auth">
     <div class="card stack">
       <h2 class="text-h3" data-i18n="login_title"></h2>
-      <form id="login-form" class="stack-tight">
+      <form id="login-form" class="stack-tight" novalidate>
         <div class="field">
           <label for="login-username" data-i18n="login_username"></label>
           <input class="input" id="login-username" type="text" autocomplete="username" required>
@@ -52,7 +52,7 @@
   </section>
 
   <section id="app-section" class="hidden">
-    <nav class="tabs" role="tablist" aria-label="Admin sections">
+    <nav class="tabs" role="tablist" data-i18n-aria-label="a11y_admin_sections">
       <button class="tab" role="tab" id="tab-btn-calendar" aria-selected="true">
         <i class="fa-solid fa-calendar-days icon" aria-hidden="true"></i><span data-i18n="nav_calendar"></span>
       </button>
@@ -71,7 +71,7 @@
     </nav>
 
     <section id="tab-calendar" class="stack-tight">
-      <div class="row-wrap text-caption" role="group" aria-label="Legend">
+      <div class="row-wrap text-caption" role="group" data-i18n-aria-label="a11y_legend">
         <span class="row"><span class="dot dot--free"></span><span data-i18n="calendar_legend_free"></span></span>
         <span class="row"><span class="dot dot--booked"></span><span data-i18n="calendar_legend_booked"></span></span>
         <span class="row"><span class="dot dot--blocked"></span><span data-i18n="calendar_legend_blocked"></span></span>
@@ -92,7 +92,7 @@
         </div>
         <p class="section__hint text-helper" data-i18n="schedule_template_hint"></p>
         <div id="template-list" class="list"></div>
-        <form id="template-form" class="form-row">
+        <form id="template-form" class="form-row" novalidate>
           <div class="field">
             <label for="tf-weekday" data-i18n="schedule_template_add_weekday"></label>
             <select class="input" id="tf-weekday"></select>
@@ -116,7 +116,7 @@
         <div class="section__head">
           <h2 class="section__title" data-i18n="schedule_weeks_title"></h2>
         </div>
-        <form id="bulk-form" class="form-row">
+        <form id="bulk-form" class="form-row" novalidate>
           <div class="field field--narrow">
             <label for="bulk-weeks" data-i18n="schedule_bulk_weeks_label"></label>
             <input class="input" id="bulk-weeks" type="number" min="1" max="26" value="4">
@@ -134,7 +134,7 @@
     </section>
 
     <section id="tab-log" class="hidden stack-tight">
-      <form id="log-filters" class="form-row">
+      <form id="log-filters" class="form-row" novalidate>
         <div class="field">
           <label for="log-type" data-i18n="log_filter_type"></label>
           <select class="input" id="log-type"></select>
@@ -170,7 +170,7 @@
         </div>
         <p class="section__hint text-helper" data-i18n="settings_locations_hint"></p>
         <div id="location-list" class="list"></div>
-        <form id="location-form" class="form-row">
+        <form id="location-form" class="form-row" novalidate>
           <div class="field field--grow">
             <label for="loc-title" data-i18n="settings_locations_add_label"></label>
             <input class="input" id="loc-title" type="text" required maxlength="100">
@@ -195,7 +195,7 @@
             </button>
           </div>
         </div>
-        <form id="slug-form" class="field">
+        <form id="slug-form" class="field" novalidate>
           <label for="slug-input" data-i18n="settings_slug_custom"></label>
           <div class="form-row">
             <input class="input field--grow" id="slug-input" type="text" pattern="[a-z0-9-]{3,32}"
@@ -231,6 +231,7 @@
 
 <script src="/shared/i18n.js"></script>
 <script src="/shared/format.js"></script>
+<script src="/shared/validate.js"></script>
 <script src="/shared/api.js"></script>
 <script src="/shared/ui.js"></script>
 <script src="/shared/calendar.js"></script>

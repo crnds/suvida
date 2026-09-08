@@ -15,7 +15,7 @@
 // Use `vercel dev` before deploying anything routing-related.
 import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
-import { join, extname, resolve, dirname } from 'node:path';
+import { join, extname, resolve, dirname, sep } from 'node:path';
 import { fileURLToPath, URL } from 'node:url';
 
 import publicHandler from '../api/public/[...route].js';
@@ -109,16 +109,45 @@ const server = createServer(async (req, res) => {
 
   // Real files win before the rewrite below, so /b/page.js is served as the
   // script it is rather than being swallowed by the /b/:slug rule.
-  for (const candidate of [join(PUBLIC, path), join(PUBLIC, path, 'index.html'), join(PUBLIC, `${path}.html`)]) {
-    if (!resolve(candidate).startsWith(PUBLIC)) continue;
+  //
+  // No `${path}.html` candidate: that is cleanUrls behaviour, and vercel.json
+  // does not set cleanUrls. Serving it here made /admin/index resolve locally
+  // and 404 in production — drift in the direction that hides bugs.
+  for (const candidate of [join(PUBLIC, path), join(PUBLIC, path, 'index.html')]) {
+    // Trailing separator matters: without it a sibling directory named
+    // `publicXYZ` would satisfy the prefix test.
+    if (!resolve(candidate).startsWith(PUBLIC + sep)) continue;
     if (await serveStatic(res, candidate)) return;
   }
 
   // vercel.json rewrite: /b/:slug -> /b/index.html
   if (/^\/b\/[^/]+\/?$/.test(path) && await serveStatic(res, join(PUBLIC, 'b/index.html'))) return;
 
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
   res.status(404).send('Not found');
 });
+
+// EADDRINUSE is the likely case here — `npm run dev` and `vercel dev` both
+// want 3000 — and without a listener it surfaced as an uncaught 'error' event
+// and a raw stack, rather than the friendly message the rest of this file
+// goes to the trouble of writing.
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`dev server: port ${PORT} is already in use.`);
+    console.error('Stop the other server, or run with a different port: PORT=3001 npm run dev');
+  } else {
+    console.error('dev server failed to start:', err);
+  }
+  process.exitCode = 1;
+});
+
+for (const signal of ['SIGINT', 'SIGTERM']) {
+  process.on(signal, () => {
+    server.close(() => process.exit(0));
+    // Don't hang forever on keep-alive connections.
+    setTimeout(() => process.exit(0), 2000).unref();
+  });
+}
 
 server.listen(PORT, () => {
   console.log(`dev server on http://localhost:${PORT}`);

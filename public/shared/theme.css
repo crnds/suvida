@@ -813,6 +813,7 @@ input[type="checkbox"], input[type="radio"] {
   border-color: var(--primary);
   color: var(--text-on-dark);
 }
+.calendar-day[aria-current="true"] .calendar-day__dot,
 .calendar-day.is-selected .calendar-day__dot { background: var(--text-on-dark); }
 /* Inset, because half the 6px grid gap is less than the theme's 2px offset. */
 .calendar-day:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }

@@ -1,8 +1,9 @@
 import { getDb } from '../../_lib/db.js';
-import { canonicalizePhone } from '../../_lib/phone.js';
-import { checkRateLimit, getClientIp } from '../../_lib/ratelimit.js';
+import { nowUnix } from '../../_lib/time.js';
+import { canonicalizePhone, isValidPhone } from '../../_lib/phone.js';
+import { badRequest, ipRateLimited, rateLimited } from '../../_lib/respond.js';
+import { isValidSlug } from '../../_lib/slug.js';
 
-const SLUG_RE = /^[a-z]{6}$/;
 const LIMIT = 10;
 
 // Phone-only lookup is documented as known-weak (plan.md "Auth & security"),
@@ -11,34 +12,26 @@ const LIMIT = 10;
 // can't be hammered from many IPs.
 export async function getHistory(req, res) {
   const db = getDb();
-  const ip = getClientIp(req);
-  const ipLimit = await checkRateLimit(db, `public/history:${ip}`, LIMIT);
-  if (!ipLimit.allowed) {
-    res.setHeader('Retry-After', String(ipLimit.retryAfter));
-    res.status(429).json({ error: 'rate_limited' });
-    return;
-  }
+  if (await ipRateLimited(res, db, 'public/history', LIMIT, req)) return;
 
   const { slug, phone } = req.body ?? {};
-  if (typeof slug !== 'string' || !SLUG_RE.test(slug) || !phone) {
-    res.status(400).json({ error: 'invalid_request' });
+  // Rejecting a junk phone before it becomes a rate-limit key also closes the
+  // unbounded-key write: there was no upper length bound, so a 500 KB
+  // "phone" became a 500 KB rate_limits.key row, repeatable at will.
+  if (!isValidSlug(slug) || !isValidPhone(phone)) {
+    badRequest(res);
     return;
   }
   const canonPhone = canonicalizePhone(phone);
 
-  const phoneLimit = await checkRateLimit(db, `public/history:phone:${canonPhone}`, LIMIT);
-  if (!phoneLimit.allowed) {
-    res.setHeader('Retry-After', String(phoneLimit.retryAfter));
-    res.status(429).json({ error: 'rate_limited' });
-    return;
-  }
+  if (await rateLimited(res, db, `public/history:phone:${canonPhone}`, LIMIT)) return;
 
   const admin = await db.execute({ sql: 'SELECT id FROM admins WHERE slug = ?', args: [slug] });
   if (!admin.rows[0]) {
     res.status(404).json({ error: 'not_found' });
     return;
   }
-  const now = Math.floor(Date.now() / 1000);
+  const now = nowUnix();
 
   // INNER JOIN to slots naturally excludes a booking whose slot was later
   // deleted (the documented dangling slot_id case) instead of erroring.
