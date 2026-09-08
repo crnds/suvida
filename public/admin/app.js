@@ -257,32 +257,41 @@ function renderTemplate() {
     }));
     return;
   }
-  const sorted = [...STATE.template].sort((a, b) => a.weekday - b.weekday || a.start_minutes - b.start_minutes);
-  els.templateList.replaceChildren(...sorted.map((entry) => {
-    const loc = STATE.locations.find((l) => l.id === entry.location_id);
-    const delBtn = UI.button({
-      kind: 'tertiary', size: 'sm', iconOnly: true, icon: 'trash',
-      ariaLabel: I18N.t('common_delete'),
-    });
-    const row = UI.listRow({
-      mainNode: UI.el('div', { class: 'tabular-nums', text: `${I18N.weekdayFull(entry.weekday)} · ${minutesToTimeInput(entry.start_minutes)}` }),
-      meta: loc ? loc.title : '',
-      actions: [delBtn],
-    });
-    delBtn.addEventListener('click', async () => {
-      await UI.withBusy(delBtn, async () => {
-        try {
-          await Api.removeTemplateEntry(entry.id);
-          STATE.template = STATE.template.filter((t) => t.id !== entry.id);
-          renderTemplate();
-          UI.toast('success', I18N.t('schedule_template_removed'));
-        } catch (err) {
-          UI.toastError(err);
-        }
+  const byWeekday = Array.from({ length: 7 }, () => []);
+  STATE.template.forEach((entry) => byWeekday[entry.weekday].push(entry));
+  byWeekday.forEach((entries) => entries.sort((a, b) => a.start_minutes - b.start_minutes));
+
+  const grid = UI.el('div', { class: 'week-grid' }, byWeekday.map((entries, weekday) => UI.el('div', { class: 'week-grid__day' }, [
+    UI.el('div', { class: 'week-grid__day-head', text: I18N.weekdayShort(weekday) }),
+    ...entries.map((entry) => {
+      const loc = STATE.locations.find((l) => l.id === entry.location_id);
+      const delBtn = UI.button({
+        kind: 'tertiary', size: 'sm', iconOnly: true, icon: 'trash',
+        ariaLabel: I18N.t('common_delete'),
       });
-    });
-    return row;
-  }));
+      const row = UI.el('div', { class: 'week-grid__slot' }, [
+        UI.el('div', { class: 'week-grid__slot-main' }, [
+          UI.el('div', { class: 'tabular-nums', text: minutesToTimeInput(entry.start_minutes) }),
+          loc ? UI.el('span', { class: 'week-grid__slot-meta', text: I18N.localized(loc.title, loc.title_th) }) : null,
+        ]),
+        delBtn,
+      ]);
+      delBtn.addEventListener('click', async () => {
+        await UI.withBusy(delBtn, async () => {
+          try {
+            await Api.removeTemplateEntry(entry.id);
+            STATE.template = STATE.template.filter((t) => t.id !== entry.id);
+            renderTemplate();
+            UI.toast('success', I18N.t('schedule_template_removed'));
+          } catch (err) {
+            UI.toastError(err);
+          }
+        });
+      });
+      return row;
+    }),
+  ])));
+  els.templateList.replaceChildren(grid);
 }
 
 // Shows a message in a .field-error node, with an icon and an alert role.

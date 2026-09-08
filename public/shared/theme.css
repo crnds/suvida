@@ -749,6 +749,50 @@ input[type="checkbox"], input[type="radio"] {
 .list-row--stacked { flex-direction: column; align-items: flex-start; gap: var(--space-1); }
 .list-row--stacked > .list-row__main { flex: 0 0 auto; width: 100%; }
 
+/* ── Week grid (schedule template: one column per weekday) ─ */
+
+.week-grid-scroll { overflow-x: auto; }
+
+.week-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(120px, 1fr));
+  gap: var(--space-2);
+}
+
+.week-grid__day {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+  border: var(--border-w) solid var(--border);
+  border-radius: var(--radius-card);
+  padding: var(--space-2);
+}
+
+.week-grid__day-head {
+  text-align: center;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text2);
+  padding-bottom: var(--space-1);
+  border-bottom: var(--border-w) solid var(--border-subtle);
+}
+
+.week-grid__slot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-1);
+  padding: var(--space-icon) 0;
+  border-bottom: var(--border-w) solid var(--border-subtle);
+  font-size: 13px;
+}
+.week-grid__slot:last-child { border-bottom: none; }
+.week-grid__slot-main { min-width: 0; }
+.week-grid__slot-meta { display: block; font-size: 11px; color: var(--text2); }
+
 /* ── Banners ────────────────────────────────────────────── */
 
 .dot { width: 8px; height: 8px; border-radius: 999px; background: var(--color-error); display: inline-block; flex: none; }
