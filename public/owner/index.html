@@ -2,29 +2,37 @@
 <html lang="th">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#fbf9f6">
 <title>Suvida — Owner</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+Thai:wght@400;500;600&family=Noto+Sans+Thai:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+Thai:wght@400;500&family=Noto+Sans+Thai:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/fontawesome.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/solid.min.css">
 <link rel="stylesheet" href="/shared/theme.css">
 </head>
 <body>
 
+<a class="skip-link" href="#main" data-i18n="a11y_skip_to_content"></a>
+
 <header class="app-header">
-  <div class="app-header__brand">Suvida — Owner</div>
-  <div class="row">
+  <h1 class="app-header__brand">Suvida — Owner</h1>
+  <div class="app-header__actions">
     <div id="lang-toggle"></div>
-    <button class="btn btn-ghost btn-sm hidden" id="logout-btn" data-i18n="nav_logout"></button>
+    <button class="btn btn-ghost btn-sm hidden" id="logout-btn">
+      <i class="fa-solid fa-arrow-right-from-bracket icon" aria-hidden="true"></i><span data-i18n="nav_logout"></span>
+    </button>
   </div>
 </header>
 
-<main class="app-shell" style="padding-top: var(--space-3);">
+<main class="app-shell" id="main">
 
-  <section id="login-section" class="hidden" style="max-width: 360px; margin: var(--space-8) auto;">
+  <section id="login-section" class="hidden panel--auth">
     <div class="card stack">
       <h2 class="text-h3" data-i18n="login_title"></h2>
-      <form id="login-form" class="stack">
+      <form id="login-form" class="stack-tight">
         <div class="field">
           <label for="login-username" data-i18n="login_username"></label>
           <input class="input" id="login-username" type="text" autocomplete="username" required>
@@ -33,38 +41,49 @@
           <label for="login-password" data-i18n="login_password"></label>
           <input class="input" id="login-password" type="password" autocomplete="current-password" required>
         </div>
-        <div id="login-error" class="field-error hidden"></div>
-        <button type="submit" class="btn btn-primary" data-i18n="login_submit"></button>
+        <div id="login-error" class="field-error hidden" role="alert"></div>
+        <button type="submit" class="btn btn-primary btn-block" id="login-submit" data-i18n="login_submit"></button>
       </form>
     </div>
   </section>
 
-  <section id="app-section" class="hidden stack">
-    <div class="row-between">
-      <h2 class="text-h2" data-i18n="owner_title"></h2>
-    </div>
+  <section id="app-section" class="hidden">
+    <h2 class="text-h2" data-i18n="owner_title"></h2>
 
-    <div class="card">
-      <h3 class="card-title" data-i18n="owner_admin_create_title"></h3>
-      <form id="create-form" class="grid-auto">
-        <div class="field">
-          <label for="ca-username" data-i18n="owner_admin_username"></label>
-          <input class="input" id="ca-username" type="text" required>
+    <div class="section">
+      <div class="section__head">
+        <h3 class="section__title" data-i18n="owner_admin_create_title"></h3>
+      </div>
+      <form id="create-form" class="stack-tight">
+        <div class="grid-auto">
+          <div class="field">
+            <label for="ca-username" data-i18n="owner_admin_username"></label>
+            <input class="input" id="ca-username" type="text" autocomplete="off" required>
+          </div>
+          <div class="field">
+            <label for="ca-password" data-i18n="owner_admin_password"></label>
+            <input class="input" id="ca-password" type="password" autocomplete="new-password" required>
+          </div>
+          <div class="field">
+            <label for="ca-display-name" data-i18n="owner_admin_display_name"></label>
+            <input class="input" id="ca-display-name" type="text" required>
+          </div>
         </div>
-        <div class="field">
-          <label for="ca-password" data-i18n="owner_admin_password"></label>
-          <input class="input" id="ca-password" type="password" required>
-        </div>
-        <div class="field">
-          <label for="ca-display-name" data-i18n="owner_admin_display_name"></label>
-          <input class="input" id="ca-display-name" type="text" required>
+        <div id="create-error" class="field-error hidden" role="alert"></div>
+        <div class="form-row">
+          <button type="submit" class="btn btn-primary" id="create-submit">
+            <i class="fa-solid fa-user-plus icon" aria-hidden="true"></i><span data-i18n="owner_admin_create_btn"></span>
+          </button>
         </div>
       </form>
-      <div id="create-error" class="field-error hidden" style="margin-top: var(--space-1);"></div>
-      <button type="submit" form="create-form" class="btn btn-primary" style="margin-top: var(--space-2);" data-i18n="owner_admin_create_btn"></button>
     </div>
 
-    <div id="admins-list" class="list"></div>
+    <div class="section">
+      <div class="section__head">
+        <h3 class="section__title" data-i18n="nav_admins"></h3>
+      </div>
+      <div id="admins-list" class="list"></div>
+    </div>
   </section>
 
 </main>
@@ -74,6 +93,7 @@
 <script src="/shared/i18n.js"></script>
 <script src="/shared/format.js"></script>
 <script src="/shared/api.js"></script>
+<script src="/shared/ui.js"></script>
 <script src="/owner/app.js"></script>
 </body>
 </html>

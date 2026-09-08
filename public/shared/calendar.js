@@ -1,6 +1,6 @@
 // Reusable month-view calendar grid, shared by the booker page and the
-// admin calendar tab. Mobile-first: 7-column grid, ≥48px tap targets
-// (~CLAUDE.md "Responsive"). Depends on i18n.js + format.js.
+// admin calendar tab. Mobile-first: 7-column grid, comfortable tap targets.
+// Depends on i18n.js + format.js + ui.js.
 'use strict';
 
 function shiftMonthString(monthStr, delta) {
@@ -21,45 +21,64 @@ function firstWeekdayOfMonth(y, m) { return new Date(Date.UTC(y, m - 1, 1)).getU
 //   button's label so the state isn't colour-only for a screen reader.
 function createMonthCalendar(container, handlers) {
   let currentMonth = null;
+  let selectedDate = null;
+
+  // The nav is built separately from the grid so loading and error states can
+  // keep it on screen. Replacing the whole container (as this used to do) left
+  // a failed month with no way to page away from it — the worst dead end in
+  // the booking flow.
+  function buildNav(monthStr) {
+    const [y, m] = monthStr.split('-').map(Number);
+    const nav = UI.el('div', { class: 'calendar-nav' });
+
+    const prevBtn = UI.button({
+      kind: 'tertiary', size: 'sm', iconOnly: true, icon: 'chevron-left',
+      ariaLabel: I18N.t('calendar_prev'),
+      onClick: () => handlers.onMonthChange(shiftMonthString(monthStr, -1)),
+    });
+    const nextBtn = UI.button({
+      kind: 'tertiary', size: 'sm', iconOnly: true, icon: 'chevron-right',
+      ariaLabel: I18N.t('calendar_next'),
+      onClick: () => handlers.onMonthChange(shiftMonthString(monthStr, 1)),
+    });
+
+    const label = UI.el('div', {
+      class: 'calendar-nav__label',
+      text: `${I18N.monthName(m)} ${y}`,
+      attrs: { 'aria-live': 'polite' },
+    });
+
+    nav.append(prevBtn, label, nextBtn);
+    return nav;
+  }
+
+  // Draws the nav plus an arbitrary node in place of the grid.
+  function renderMessage(monthStr, node) {
+    currentMonth = monthStr;
+    container.replaceChildren(buildNav(monthStr), node);
+  }
 
   function render(monthStr, cellFn) {
     currentMonth = monthStr;
-    container.innerHTML = '';
+
+    // A re-render (language toggle, refresh after booking) rebuilds every
+    // button, which would otherwise drop keyboard focus to <body>.
+    const focusedDate = document.activeElement?.closest?.('.calendar-day')?.dataset.date;
 
     const [y, m] = monthStr.split('-').map(Number);
     const today = bangkokTodayString();
 
-    const nav = document.createElement('div');
-    nav.className = 'calendar-nav';
+    const grid = UI.el('div', {
+      class: 'calendar-grid',
+      attrs: { role: 'group', 'aria-label': `${I18N.monthName(m)} ${y}` },
+    });
 
-    const prevBtn = document.createElement('button');
-    prevBtn.type = 'button';
-    prevBtn.className = 'btn btn-ghost btn-sm';
-    prevBtn.textContent = '‹';
-    prevBtn.setAttribute('aria-label', I18N.t('calendar_prev'));
-    prevBtn.addEventListener('click', () => handlers.onMonthChange(shiftMonthString(monthStr, -1)));
-
-    const label = document.createElement('div');
-    label.className = 'calendar-nav__label';
-    label.textContent = `${I18N.monthName(m)} ${y}`;
-
-    const nextBtn = document.createElement('button');
-    nextBtn.type = 'button';
-    nextBtn.className = 'btn btn-ghost btn-sm';
-    nextBtn.textContent = '›';
-    nextBtn.setAttribute('aria-label', I18N.t('calendar_next'));
-    nextBtn.addEventListener('click', () => handlers.onMonthChange(shiftMonthString(monthStr, 1)));
-
-    nav.append(prevBtn, label, nextBtn);
-    container.appendChild(nav);
-
-    const grid = document.createElement('div');
-    grid.className = 'calendar-grid';
     for (let d = 0; d < 7; d++) {
-      const wd = document.createElement('div');
-      wd.className = 'calendar-weekday';
-      wd.textContent = I18N.weekdayShort(d);
-      grid.appendChild(wd);
+      grid.appendChild(UI.el('div', {
+        class: 'calendar-weekday',
+        text: I18N.weekdayShort(d),
+        attrs: { 'aria-hidden': 'true' },
+      }));
     }
 
     const numDays = daysInMonth(y, m);
@@ -67,10 +86,10 @@ function createMonthCalendar(container, handlers) {
 
     // Leading placeholders hold their grid track without painting a card.
     for (let i = 0; i < startWeekday; i++) {
-      const blank = document.createElement('div');
-      blank.setAttribute('aria-hidden', 'true');
-      grid.appendChild(blank);
+      grid.appendChild(UI.el('div', { attrs: { 'aria-hidden': 'true' } }));
     }
+
+    let toFocus = null;
 
     for (let day = 1; day <= numDays; day++) {
       const dateStr = `${y}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
@@ -81,15 +100,13 @@ function createMonthCalendar(container, handlers) {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'calendar-day';
+      btn.dataset.date = dateStr;
       btn.classList.add(`calendar-day--${cell.state || 'closed'}`);
       if (isToday) btn.classList.add('calendar-day--today');
       if (isPast) btn.classList.add('calendar-day--past');
+      if (dateStr === selectedDate) btn.classList.add('is-selected');
 
-      const numEl = document.createElement('div');
-      numEl.className = 'calendar-day__num';
-      numEl.textContent = String(day);
-      btn.appendChild(numEl);
-
+      btn.appendChild(UI.el('div', { class: 'calendar-day__num', text: String(day) }));
       if (cell.node) btn.appendChild(cell.node);
 
       const parts = [fmtWeekdayDate(dateStr)];
@@ -102,14 +119,27 @@ function createMonthCalendar(container, handlers) {
       } else {
         btn.addEventListener('click', () => handlers.onDayClick(dateStr));
       }
+      if (dateStr === focusedDate && !btn.disabled) toFocus = btn;
       grid.appendChild(btn);
     }
 
-    container.appendChild(grid);
+    container.replaceChildren(buildNav(monthStr), grid);
+    toFocus?.focus({ preventScroll: true });
+  }
+
+  // Highlights the day whose panel is open, so the calendar behind the sheet
+  // shows what you tapped. Cheap enough to call on every open/close.
+  function setSelected(dateStr) {
+    selectedDate = dateStr || null;
+    container.querySelectorAll('.calendar-day').forEach((btn) => {
+      btn.classList.toggle('is-selected', btn.dataset.date === selectedDate);
+    });
   }
 
   return {
     render,
+    renderMessage,
+    setSelected,
     get currentMonth() { return currentMonth; },
   };
 }

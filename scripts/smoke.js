@@ -124,14 +124,18 @@ async function createAdmin(username, display_name, password) {
   if (res.status !== 201) throw new Error(`createAdmin(${username}) failed: ${res.status} ${JSON.stringify(res.json)}`);
   const loginRes = await req('POST', '/api/admin/login', { body: { username, password } });
   if (loginRes.status !== 200 || !loginRes.cookie) throw new Error(`admin login failed for ${username}`);
-  return { id: res.json.id, username, slug: res.json.slug, cookie: loginRes.cookie };
+  // Every template/slot creation now requires a location_id, so every test
+  // admin gets one default location up front.
+  const locRes = await req('POST', '/api/admin/locations', { cookie: loginRes.cookie, body: { title: 'Smoke Studio' } });
+  if (locRes.status !== 201) throw new Error(`createAdmin(${username}) default location failed: ${locRes.status} ${JSON.stringify(locRes.json)}`);
+  return { id: res.json.id, username, slug: res.json.slug, cookie: loginRes.cookie, defaultLocationId: locRes.json.id };
 }
 
 // Bypasses the template/week-activation pipeline for tests that just need a
 // precisely-timed slot. Real activation is exercised separately in tests
 // 2, 10, and 19.
-async function addOverrideSlot(admin, startUnix, blocked = false) {
-  const res = await req('POST', '/api/admin/slots', { cookie: admin.cookie, body: { start_unix: startUnix, blocked } });
+async function addOverrideSlot(admin, startUnix, blocked = false, locationId = admin.defaultLocationId) {
+  const res = await req('POST', '/api/admin/slots', { cookie: admin.cookie, body: { start_unix: startUnix, blocked, location_id: locationId } });
   if (res.status !== 201) throw new Error(`addOverrideSlot failed: ${res.status} ${JSON.stringify(res.json)}`);
   return res.json.id;
 }
@@ -179,7 +183,7 @@ async function test2() {
   assert('test2: teacherA created with 6-letter slug', /^[a-z]{6}$/.test(S.teacherA.slug));
   assert('test2: teacherB created with 6-letter slug', /^[a-z]{6}$/.test(S.teacherB.slug));
 
-  const tmpl = await req('POST', '/api/admin/template', { cookie: S.teacherA.cookie, body: { weekday: 3, start_minutes: 660 } });
+  const tmpl = await req('POST', '/api/admin/template', { cookie: S.teacherA.cookie, body: { weekday: 3, start_minutes: 660, location_id: S.teacherA.defaultLocationId } });
   assert('test2: add template entry succeeds', tmpl.status === 201, JSON.stringify(tmpl.json));
 
   const weekStart = bangkokWeekStartSunday(Math.floor(Date.now() / 1000));
@@ -216,7 +220,12 @@ async function test3and4() {
 
 async function test5() {
   await resetRateLimits();
-  const base = futureUnix(60 * 24); // 60 days out — its own calendar day, isolated from every other test
+  // 60 days out — its own calendar day, isolated from every other test.
+  // Pinned to 10:00 Bangkok rather than "now + 60 days": this is the only test
+  // that asserts a per-calendar-day count, so when it ran within 30 minutes of
+  // Bangkok midnight the +1800 slot landed on the *next* day and the count came
+  // back 1 instead of 2 — a real failure for half an hour out of every 24.
+  const base = unixFromBangkokDateTime(bangkokDateString(futureUnix(60 * 24)), 10 * 60);
   S.slot2 = await addOverrideSlot(S.teacherA, base);
   S.slot3 = await addOverrideSlot(S.teacherA, base + 1800);
 
@@ -303,8 +312,8 @@ async function test9() {
 
 async function test10() {
   const weekStart = bangkokWeekStartSunday(futureUnix(7 * 24));
-  await req('POST', '/api/admin/template', { cookie: S.teacherA.cookie, body: { weekday: 2, start_minutes: 540 } });
-  await req('POST', '/api/admin/template', { cookie: S.teacherA.cookie, body: { weekday: 2, start_minutes: 570 } });
+  await req('POST', '/api/admin/template', { cookie: S.teacherA.cookie, body: { weekday: 2, start_minutes: 540, location_id: S.teacherA.defaultLocationId } });
+  await req('POST', '/api/admin/template', { cookie: S.teacherA.cookie, body: { weekday: 2, start_minutes: 570, location_id: S.teacherA.defaultLocationId } });
   const act = await req('POST', `/api/admin/weeks/${weekStart}/activate`, { cookie: S.teacherA.cookie });
   assert('test10: activate week (2 template slots) succeeds', act.status === 200, JSON.stringify(act.json));
 
@@ -514,8 +523,8 @@ async function test16() {
   assert('test16: admin can book a blocked slot (201) — blocked binds bookers only', bookBlocked.status === 201, JSON.stringify(bookBlocked.json));
 
   const pastInsert = await run(
-    "INSERT INTO slots (admin_id, start_unix, source, blocked) VALUES (?, ?, 'override', 0)",
-    [S.teacherA.id, Math.floor(Date.now() / 1000) - 3600]
+    "INSERT INTO slots (admin_id, start_unix, source, blocked, location_id) VALUES (?, ?, 'override', 0, ?)",
+    [S.teacherA.id, Math.floor(Date.now() / 1000) - 3600, S.teacherA.defaultLocationId]
   );
   const pastSlotId = Number(pastInsert.lastInsertRowid);
   const bookPast = await adminBook(S.teacherA, pastSlotId, 'Admin Books Past', '0810000074');
@@ -589,7 +598,7 @@ async function test18() {
 
 async function test19() {
   const weekStart = bangkokWeekStartSunday(futureUnix(14 * 24));
-  await req('POST', '/api/admin/template', { cookie: S.teacherA.cookie, body: { weekday: 4, start_minutes: 900 } });
+  await req('POST', '/api/admin/template', { cookie: S.teacherA.cookie, body: { weekday: 4, start_minutes: 900, location_id: S.teacherA.defaultLocationId } });
   const act = await req('POST', `/api/admin/weeks/${weekStart}/activate`, { cookie: S.teacherA.cookie });
   assert('test19: activate a distant week succeeds', act.status === 200, JSON.stringify(act.json));
 
@@ -684,6 +693,156 @@ async function test21() {
   await resetRateLimits('public/history%');
 }
 
+// ── Test 22: locations ──────────────────────────────────────────
+
+async function test22() {
+  await resetRateLimits();
+
+  const foreignLocTemplate = await req('POST', '/api/admin/template', {
+    cookie: S.teacherA.cookie,
+    body: { weekday: 5, start_minutes: 780, location_id: S.teacherB.defaultLocationId },
+  });
+  assert(
+    'test22: template entry with a foreign location_id is rejected (400)',
+    foreignLocTemplate.status === 400 && foreignLocTemplate.json.error === 'invalid_location',
+    JSON.stringify(foreignLocTemplate.json)
+  );
+
+  const foreignLocSlot = await req('POST', '/api/admin/slots', {
+    cookie: S.teacherA.cookie,
+    body: { start_unix: futureUnix(100), blocked: false, location_id: S.teacherB.defaultLocationId },
+  });
+  assert(
+    'test22: override slot with a foreign location_id is rejected (400)',
+    foreignLocSlot.status === 400 && foreignLocSlot.json.error === 'invalid_location',
+    JSON.stringify(foreignLocSlot.json)
+  );
+
+  // Week activation carries location_id from the template row to the
+  // materialized slot.
+  const newLoc = await req('POST', '/api/admin/locations', { cookie: S.teacherA.cookie, body: { title: 'Second Studio' } });
+  assert('test22: second location created', newLoc.status === 201, JSON.stringify(newLoc.json));
+  const weekStart = bangkokWeekStartSunday(futureUnix(21 * 24));
+  const tmpl = await req('POST', '/api/admin/template', {
+    cookie: S.teacherA.cookie,
+    body: { weekday: 6, start_minutes: 600, location_id: newLoc.json.id },
+  });
+  assert('test22: template entry with the new location succeeds', tmpl.status === 201, JSON.stringify(tmpl.json));
+  const act = await req('POST', `/api/admin/weeks/${weekStart}/activate`, { cookie: S.teacherA.cookie });
+  assert('test22: activate week succeeds', act.status === 200, JSON.stringify(act.json));
+  const saturdayUnix = unixFromBangkokDateTime(weekStart, 0, 0) + 6 * DAY_SECONDS + 600 * 60;
+  const materialized = await row('SELECT location_id FROM slots WHERE admin_id = ? AND start_unix = ?', [S.teacherA.id, saturdayUnix]);
+  assert(
+    "test22: materialized slot carries the template entry's location_id",
+    materialized && materialized.location_id === newLoc.json.id,
+    JSON.stringify(materialized)
+  );
+
+  // Deletion blocked while referenced, then succeeds once unreferenced.
+  const delWhileUsed = await req('DELETE', `/api/admin/locations/${newLoc.json.id}`, { cookie: S.teacherA.cookie });
+  assert(
+    'test22: deleting a location still referenced by a slot/template is rejected (409)',
+    delWhileUsed.status === 409 && delWhileUsed.json.error === 'location_in_use',
+    JSON.stringify(delWhileUsed.json)
+  );
+
+  await run('DELETE FROM slots WHERE admin_id = ? AND start_unix = ?', [S.teacherA.id, saturdayUnix]);
+  await run('DELETE FROM templates WHERE admin_id = ? AND location_id = ?', [S.teacherA.id, newLoc.json.id]);
+  const delAfterFree = await req('DELETE', `/api/admin/locations/${newLoc.json.id}`, { cookie: S.teacherA.cookie });
+  assert('test22: deleting an unreferenced location succeeds (200)', delAfterFree.status === 200, JSON.stringify(delAfterFree.json));
+}
+
+// ── Test 23: admin settings reset ──────────────────────────────
+// Clears template + locations (restoring default "Studio") and issues a
+// fresh slug. Slots and bookings ride along — a reset must never cancel.
+
+async function test23() {
+  await resetRateLimits();
+
+  const unauth = await req('POST', '/api/admin/settings/reset');
+  assert('test23: unauthenticated reset is 401', unauth.status === 401, JSON.stringify(unauth.json));
+
+  const admin = await createAdmin(`smoke_reset_${RUN_ID}`, 'Smoke Reset', 'passwordR1');
+  const extraLoc = await req('POST', '/api/admin/locations', { cookie: admin.cookie, body: { title: 'Room B' } });
+  assert('test23: extra location created', extraLoc.status === 201, JSON.stringify(extraLoc.json));
+
+  const tmpl = await req('POST', '/api/admin/template', {
+    cookie: admin.cookie,
+    body: { weekday: 1, start_minutes: 600, location_id: extraLoc.json.id },
+  });
+  assert('test23: template entry created', tmpl.status === 201, JSON.stringify(tmpl.json));
+
+  const slotUnix = futureUnix(48);
+  const slotId = await addOverrideSlot(admin, slotUnix, false, extraLoc.json.id);
+  const book = await publicBook(admin.slug, slotId, 'Reset Student', '0810000099');
+  assert('test23: booking on the extra-location slot succeeds', book.status === 201, JSON.stringify(book.json));
+  const bookingId = book.json.id;
+
+  const eventsBefore = await rows('SELECT id FROM booking_events WHERE admin_id = ?', [admin.id]);
+  const weeksBefore = await rows('SELECT week_start_date FROM week_activations WHERE admin_id = ?', [admin.id]);
+  const oldSlug = admin.slug;
+
+  const reset = await req('POST', '/api/admin/settings/reset', { cookie: admin.cookie });
+  assert('test23: reset returns 200 with a new 6-letter slug',
+    reset.status === 200 && /^[a-z]{6}$/.test(reset.json.slug) && reset.json.slug !== oldSlug,
+    JSON.stringify(reset.json));
+  assert('test23: reset returns a location_id', Number.isInteger(reset.json.location_id) && reset.json.location_id > 0,
+    JSON.stringify(reset.json));
+
+  const templates = await rows('SELECT id FROM templates WHERE admin_id = ?', [admin.id]);
+  assert('test23: templates are empty after reset', templates.length === 0, `count=${templates.length}`);
+
+  const locations = await rows('SELECT id, title FROM locations WHERE admin_id = ?', [admin.id]);
+  assert('test23: exactly one location remains, titled Studio',
+    locations.length === 1 && locations[0].title === 'Studio',
+    JSON.stringify(locations));
+  assert('test23: returned location_id matches the new Studio row',
+    Number(locations[0].id) === reset.json.location_id,
+    `db=${locations[0].id} json=${reset.json.location_id}`);
+
+  const slot = await row('SELECT id, location_id FROM slots WHERE id = ?', [slotId]);
+  assert('test23: existing slot is kept and re-pointed at Studio',
+    slot && Number(slot.location_id) === reset.json.location_id,
+    JSON.stringify(slot));
+
+  const booking = await row('SELECT id, cancelled_at FROM bookings WHERE id = ?', [bookingId]);
+  assert('test23: existing booking is kept (not cancelled)',
+    booking && booking.cancelled_at == null,
+    JSON.stringify(booking));
+
+  const eventsAfter = await rows('SELECT id FROM booking_events WHERE admin_id = ?', [admin.id]);
+  assert('test23: booking_events are untouched',
+    eventsAfter.length === eventsBefore.length,
+    `before=${eventsBefore.length} after=${eventsAfter.length}`);
+
+  const weeksAfter = await rows('SELECT week_start_date FROM week_activations WHERE admin_id = ?', [admin.id]);
+  assert('test23: week_activations are untouched',
+    weeksAfter.length === weeksBefore.length,
+    `before=${weeksBefore.length} after=${weeksAfter.length}`);
+
+  const oldPage = await req('GET', '/api/public/page', { query: { slug: oldSlug, month: bangkokDateString(slotUnix).slice(0, 7) } });
+  assert('test23: old slug no longer resolves (4xx)', oldPage.status >= 400 && oldPage.status < 500, JSON.stringify(oldPage.json));
+
+  const newPage = await req('GET', '/api/public/page', { query: { slug: reset.json.slug, month: bangkokDateString(slotUnix).slice(0, 7) } });
+  assert('test23: new slug resolves (200)', newPage.status === 200, JSON.stringify(newPage.json));
+
+  const history = await publicHistory(reset.json.slug, '0810000099');
+  assert('test23: student can still look up the booking via the new slug',
+    history.status === 200 && (history.json.bookings || []).some((b) => b.id === bookingId),
+    JSON.stringify(history.json));
+
+  // Cancelled bookings keep a slot_id row on purpose (plan.md). Deleting
+  // the now-empty slot must not 500 on a FOREIGN KEY constraint.
+  const cancel = await publicCancel(reset.json.slug, bookingId, '0810000099');
+  assert('test23: student cancel of the kept booking succeeds', cancel.status === 200, JSON.stringify(cancel.json));
+  const del = await req('DELETE', `/api/admin/slots/${slotId}`, { cookie: admin.cookie });
+  assert(
+    'test23: deleting a slot whose only bookings are cancelled succeeds (200)',
+    del.status === 200,
+    JSON.stringify(del.json)
+  );
+}
+
 // ── main ───────────────────────────────────────────────────────
 
 async function main() {
@@ -707,6 +866,8 @@ async function main() {
   await group('Test 19 — dangling slot after deactivation', test19);
   await group('Test 20 — function count', test20);
   await group('Test 21 — rate-limit window reset', test21);
+  await group('Test 22 — locations', test22);
+  await group('Test 23 — settings reset', test23);
 
   const failed = results.filter((r) => !r.pass);
   console.log(`\n${results.length - failed.length}/${results.length} assertions passed.`);

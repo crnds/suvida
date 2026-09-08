@@ -60,17 +60,18 @@ const DICT = {
     common_optional: 'ไม่บังคับ',
     common_load_more: 'โหลดเพิ่มเติม',
     common_retry: 'ลองใหม่',
+    a11y_skip_to_content: 'ข้ามไปยังเนื้อหาหลัก',
 
     // Booker page
     booker_tab_book: 'จองเวลาเรียน',
     booker_tab_history: 'ประวัติการจอง',
     booker_pick_day: 'เลือกวันที่ต้องการเรียน',
     booker_no_slots_month: 'เดือนนี้ยังไม่มีคิวว่าง',
+    booker_no_slots_month_hint: 'ลองดูเดือนถัดไป หรือสอบถามครูผู้สอนโดยตรง',
     booker_day_slots_title: 'เวลาว่างวันที่ {date}',
     booker_no_slots_day: 'วันนี้ไม่มีคิวว่างแล้ว',
     booker_slots_count: 'ว่าง {count} คิว',
     booker_day_none: 'ไม่มีคิว',
-    booker_slot_book_btn: 'จองเวลานี้',
     booker_form_title: 'กรอกข้อมูลเพื่อจอง',
     booker_form_slot_label: 'เวลาที่เลือก',
     booker_form_name: 'ชื่อผู้เรียน',
@@ -78,23 +79,31 @@ const DICT = {
     booker_form_submit: 'ยืนยันการจอง',
     booker_form_name_required: 'กรุณากรอกชื่อ',
     booker_form_phone_required: 'กรุณากรอกเบอร์โทรศัพท์',
+    booker_form_phone_invalid: 'เบอร์โทรศัพท์ไม่ถูกต้อง กรุณากรอกให้ครบ 9-10 หลัก',
+    booker_form_phone_hint: 'ใช้เบอร์นี้สำหรับค้นหาและยกเลิกการจองภายหลัง',
+    booker_form_check_fields: 'กรุณาตรวจสอบข้อมูลที่กรอก',
+    booker_form_back: 'เลือกเวลาอื่น',
     booker_book_success_title: 'จองสำเร็จ',
-    booker_book_success_body: 'บันทึกเวลาเรียนของคุณแล้ว ระบบได้บันทึกไว้ในเครื่องนี้ สามารถดูได้ที่แท็บ "ประวัติการจอง"',
-    booker_book_conflict: 'ขออภัย เวลานี้เพิ่งถูกจองไปหรือไม่ว่างแล้ว กรุณาเลือกเวลาอื่น',
+    booker_book_success_body: 'บันทึกเวลาเรียนของคุณแล้ว',
+    booker_book_success_cta: 'ดูประวัติการจอง',
     booker_book_rate_limited: 'มีการจองถี่เกินไป กรุณารอสักครู่แล้วลองใหม่',
     booker_teacher_not_found: 'ไม่พบหน้าจองนี้ ลิงก์อาจไม่ถูกต้องหรือถูกเปลี่ยนแล้ว',
     booker_history_local_title: 'การจองจากเครื่องนี้',
     booker_history_none_local: 'ยังไม่มีการจองจากเครื่องนี้',
     booker_history_lookup_title: 'ค้นหาด้วยเบอร์โทรศัพท์',
-    booker_history_lookup_phone: 'เบอร์โทรศัพท์',
+    booker_history_lookup_hint: 'จองจากเครื่องอื่นใช่ไหม? กรอกเบอร์ที่ใช้จองเพื่อดูและยกเลิกการจอง',
+    booker_history_lookup_phone: 'เช่น 0812345678',
+    booker_history_lookup_phone_label: 'เบอร์โทรศัพท์',
     booker_history_lookup_btn: 'ค้นหา',
     booker_history_lookup_none: 'ไม่พบการจองที่ใช้งานอยู่สำหรับเบอร์นี้',
+    booker_history_lookup_found: 'พบการจอง {count} รายการ',
     booker_history_cancel_btn: 'ยกเลิกการจอง',
     booker_history_cancel_locked: 'ยกเลิกไม่ได้ (เหลือน้อยกว่า 24 ชม.)',
     booker_history_cancel_confirm: 'ยืนยันยกเลิกเวลาเรียนนี้ใช่หรือไม่?',
     booker_history_cancel_success: 'ยกเลิกการจองแล้ว',
-    booker_history_cancel_failed: 'ไม่สามารถยกเลิกได้ กรุณาตรวจสอบข้อมูลอีกครั้ง',
     booker_history_rate_limited: 'ค้นหาถี่เกินไป กรุณารอสักครู่แล้วลองใหม่',
+    booker_location_filter_all: 'ทุกสถานที่',
+    booker_location_filter_label: 'กรองตามสถานที่',
 
     // Login (shared owner/admin)
     login_title: 'เข้าสู่ระบบ',
@@ -111,25 +120,31 @@ const DICT = {
     schedule_template_hint: 'การแก้ไขตารางนี้จะไม่มีผลย้อนหลังกับสัปดาห์ที่เปิดจองไปแล้ว — ใช้ "ใช้ตารางซ้ำ" กับสัปดาห์นั้นเพื่ออัปเดต',
     schedule_template_add_weekday: 'วัน',
     schedule_template_add_time: 'เวลาเริ่ม',
+    schedule_template_add_location: 'สถานที่',
     schedule_template_add_btn: 'เพิ่มช่วงเวลา',
     schedule_template_empty: 'ยังไม่มีช่วงเวลาในตารางประจำสัปดาห์',
     schedule_template_entry_exists: 'มีช่วงเวลานี้อยู่แล้ว',
+    schedule_template_added: 'เพิ่มช่วงเวลาแล้ว',
+    schedule_template_removed: 'ลบช่วงเวลาแล้ว',
+    schedule_bulk_done: 'เปิดจองล่วงหน้า {n} สัปดาห์แล้ว',
+    schedule_template_no_locations_hint: 'เพิ่มสถานที่ในหน้าตั้งค่าก่อนสร้างตารางเวลา',
     schedule_weeks_title: 'เปิด/ปิดสัปดาห์',
     schedule_weeks_activate: 'เปิดจอง',
     schedule_weeks_deactivate: 'ปิดจอง',
     schedule_weeks_reapply: 'ใช้ตารางซ้ำ',
     schedule_weeks_activated_chip: 'เปิดจองแล้ว',
-    schedule_bulk_title: 'เปิดจองล่วงหน้าหลายสัปดาห์',
     schedule_bulk_weeks_label: 'จำนวนสัปดาห์',
     schedule_bulk_btn: 'เปิดจองทั้งหมด',
 
     // Admin — calendar / bookings
     calendar_legend_free: 'ว่าง', calendar_legend_booked: 'จองแล้ว', calendar_legend_blocked: 'ปิดรับ',
     calendar_count_free: 'ว่าง {n}', calendar_count_booked: 'จอง {n}', calendar_count_blocked: 'ปิด {n}',
+    calendar_filter_all_locations: 'ทุกสถานที่',
     day_panel_title: 'รายละเอียดวันที่ {date}',
     day_panel_empty: 'วันนี้ไม่มีคิวเลย',
     day_panel_add_slot: 'เพิ่มช่วงเวลานอกตาราง',
     day_panel_add_slot_time: 'เวลา',
+    day_panel_add_slot_location: 'สถานที่',
     day_panel_add_slot_blocked: 'ปิดรับทันที',
     day_panel_slot_free: 'ว่าง',
     day_panel_slot_blocked: 'ปิดรับ',
@@ -138,7 +153,8 @@ const DICT = {
     day_panel_slot_unblock: 'เปิดรับ',
     day_panel_slot_delete: 'ลบช่วงเวลานี้',
     day_panel_slot_delete_confirm: 'ลบช่วงเวลานี้ใช่หรือไม่?',
-    day_panel_slot_booked_by: 'จองโดย {name}',
+    day_panel_slot_added: 'เพิ่มช่วงเวลาแล้ว',
+    day_panel_booking_cancelled: 'ยกเลิกการจองแล้ว',
     day_panel_booking_edit: 'แก้ไขข้อมูล',
     day_panel_booking_move: 'ย้ายเวลา',
     day_panel_booking_cancel: 'ยกเลิกการจอง',
@@ -148,6 +164,8 @@ const DICT = {
     move_modal_title: 'ย้ายไปเวลาไหน?',
     move_modal_none: 'ไม่มีช่วงเวลาว่างอื่นในวันนี้',
     move_modal_conflict: 'ย้ายไม่สำเร็จ เวลานั้นชนกับการจองอื่น',
+    move_modal_moved: 'ย้ายเวลาเรียนแล้ว',
+    move_modal_hint: 'เลือกเวลาว่างในวันเดียวกันเพื่อย้ายการจองนี้',
     booking_conflict: 'ช่วงเวลานี้ไม่ว่างแล้ว',
 
     // Admin — notifications
@@ -155,6 +173,7 @@ const DICT = {
     notif_new_booking: '{name} จองเวลา {time}',
     notif_new_cancel: '{name} ยกเลิกเวลา {time}',
     notif_go_to_day: 'ไปที่วันนี้',
+    notif_unread_count: 'แจ้งเตือนใหม่ {n} รายการ',
 
     // Admin — log
     log_filter_type: 'ประเภท', log_filter_actor: 'ผู้ทำรายการ', log_filter_month: 'เดือน',
@@ -169,6 +188,17 @@ const DICT = {
 
     // Admin — settings
     settings_display_name: 'ชื่อครูผู้สอน',
+    settings_locations_title: 'สถานที่',
+    settings_locations_hint: 'จัดการรายชื่อสถานที่สอนของคุณ',
+    settings_locations_add_label: 'ชื่อสถานที่',
+    settings_locations_add_btn: 'เพิ่มสถานที่',
+    settings_locations_empty: 'ยังไม่มีสถานที่',
+    settings_locations_in_use: 'ไม่สามารถลบได้ เนื่องจากมีตารางเวลาที่ใช้สถานที่นี้อยู่',
+    settings_locations_added: 'เพิ่มสถานที่แล้ว',
+    settings_locations_removed: 'ลบสถานที่แล้ว',
+    settings_locations_delete_confirm: 'ลบสถานที่ "{name}" ใช่หรือไม่?',
+    settings_share_copy_manual: 'คัดลอกอัตโนมัติไม่ได้ กรุณากด Ctrl/Cmd+C',
+    settings_slug_saved: 'บันทึกลิงก์ใหม่แล้ว',
     settings_slug_title: 'ลิงก์หน้าจอง',
     settings_slug_current: 'ลิงก์ปัจจุบัน',
     settings_slug_custom: 'ตั้งลิงก์เอง',
@@ -180,6 +210,12 @@ const DICT = {
     settings_slug_confirm_title: 'ยืนยันการเปลี่ยนลิงก์',
     settings_slug_confirm_body: 'ลิงก์เดิมจะใช้งานไม่ได้ทันที หากเคยแชร์ลิงก์เดิมไว้ที่ไลน์หรือที่อื่น นักเรียนจะเข้าไม่ได้อีก ต้องการดำเนินการต่อหรือไม่?',
     settings_share_copy: 'คัดลอกลิงก์',
+    settings_reset_title: 'รีเซ็ตการตั้งค่า',
+    settings_reset_hint: 'ลบตารางเวลาและสถานที่ และสร้างลิงก์จองใหม่',
+    settings_reset_btn: 'กลับค่าเดิม',
+    settings_reset_confirm_title: 'รีเซ็ตการตั้งค่า?',
+    settings_reset_confirm_body: 'ตารางเวลาและสถานที่จะถูกลบ และจะสร้างลิงก์จองใหม่ ลิงก์เดิมจะใช้งานไม่ได้ทันที การจองที่มีอยู่แล้วจะไม่ถูกลบ ต้องการดำเนินการต่อหรือไม่?',
+    settings_reset_done: 'รีเซ็ตการตั้งค่าแล้ว',
 
     // Owner
     owner_title: 'จัดการบัญชีครู',
@@ -194,11 +230,28 @@ const DICT = {
     owner_admin_new_password: 'รหัสผ่านใหม่ (ไม่บังคับ)',
     owner_admin_delete_confirm: 'ลบบัญชีของ {name} ใช่หรือไม่? ข้อมูลตาราง การจอง และประวัติทั้งหมดจะถูกลบถาวร',
     owner_admin_slug_label: 'ลิงก์',
+    owner_admin_created: 'สร้างบัญชีของ {name} แล้ว',
+    owner_admin_saved: 'บันทึกการแก้ไขแล้ว',
+    owner_admin_deleted: 'ลบบัญชีแล้ว',
+    owner_admin_password_hint: 'เว้นว่างไว้หากไม่ต้องการเปลี่ยนรหัสผ่าน',
+
+    landing_title: 'Suvida Piano Studio',
+    landing_body: 'นักเรียนจองผ่านลิงก์เฉพาะของครูแต่ละท่าน — กรุณาสอบถามลิงก์จากครูผู้สอนของคุณ',
+    landing_teacher_login: 'เข้าสู่ระบบสำหรับครู',
+    landing_owner_login: 'เข้าสู่ระบบสำหรับผู้ดูแล',
 
     error_invalid_request: 'ข้อมูลไม่ถูกต้อง',
     error_unauthorized: 'กรุณาเข้าสู่ระบบใหม่อีกครั้ง',
     error_not_found: 'ไม่พบข้อมูล',
     error_rate_limited: 'ทำรายการถี่เกินไป กรุณารอสักครู่',
+    // The API has always returned these; nothing in the front-end mapped
+    // them, so a taken slot and a wrong password both read "เกิดข้อผิดพลาด".
+    error_slot_unavailable: 'ขออภัย เวลานี้เพิ่งถูกจองไปแล้ว กรุณาเลือกเวลาอื่น',
+    error_cannot_cancel: 'ยกเลิกไม่ได้แล้ว (ต้องยกเลิกก่อนเรียนอย่างน้อย 24 ชั่วโมง)',
+    error_invalid_credentials: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง',
+    error_invalid_location: 'ไม่พบสถานที่ที่เลือก',
+    error_location_in_use: 'ลบไม่ได้ เพราะยังมีตารางหรือคิวที่ใช้สถานที่นี้อยู่',
+    error_slug_taken: 'ลิงก์นี้มีผู้ใช้แล้ว กรุณาเลือกใหม่',
   },
 
   en: {
@@ -244,16 +297,17 @@ const DICT = {
     common_optional: 'optional',
     common_load_more: 'Load more',
     common_retry: 'Retry',
+    a11y_skip_to_content: 'Skip to main content',
 
     booker_tab_book: 'Book a lesson',
     booker_tab_history: 'My bookings',
     booker_pick_day: 'Pick a day for your lesson',
     booker_no_slots_month: 'No open slots this month',
+    booker_no_slots_month_hint: 'Try the next month, or ask your teacher directly.',
     booker_day_slots_title: 'Open times on {date}',
     booker_no_slots_day: 'No open slots left today',
     booker_slots_count: '{count} open',
     booker_day_none: 'No slots',
-    booker_slot_book_btn: 'Book this time',
     booker_form_title: 'Confirm your details',
     booker_form_slot_label: 'Selected time',
     booker_form_name: 'Student name',
@@ -261,23 +315,31 @@ const DICT = {
     booker_form_submit: 'Confirm booking',
     booker_form_name_required: 'Please enter a name',
     booker_form_phone_required: 'Please enter a phone number',
+    booker_form_phone_invalid: "That doesn't look like a phone number — please enter 9-10 digits",
+    booker_form_phone_hint: "You'll use this number to find or cancel the booking later",
+    booker_form_check_fields: 'Please check the highlighted fields',
+    booker_form_back: 'Pick a different time',
     booker_book_success_title: 'Booked!',
-    booker_book_success_body: 'Your lesson is confirmed. It has been saved on this device — check the "My bookings" tab any time.',
-    booker_book_conflict: 'Sorry, that time was just taken. Please pick another.',
+    booker_book_success_body: 'Your lesson is confirmed.',
+    booker_book_success_cta: 'View my bookings',
     booker_book_rate_limited: 'Too many attempts. Please wait a moment and try again.',
     booker_teacher_not_found: "This booking page couldn't be found. The link may be wrong or has changed.",
     booker_history_local_title: 'Booked from this device',
     booker_history_none_local: 'No bookings from this device yet',
     booker_history_lookup_title: 'Look up by phone number',
-    booker_history_lookup_phone: 'Phone number',
+    booker_history_lookup_hint: 'Booked on another device? Enter the number you booked with to view or cancel it.',
+    booker_history_lookup_phone: 'e.g. 0812345678',
+    booker_history_lookup_phone_label: 'Phone number',
     booker_history_lookup_btn: 'Search',
     booker_history_lookup_none: 'No active bookings found for that number',
+    booker_history_lookup_found: '{count} booking(s) found',
     booker_history_cancel_btn: 'Cancel booking',
     booker_history_cancel_locked: 'Too late to cancel (under 24h)',
     booker_history_cancel_confirm: 'Cancel this lesson?',
     booker_history_cancel_success: 'Booking cancelled',
-    booker_history_cancel_failed: 'Could not cancel — please check your details',
     booker_history_rate_limited: 'Too many attempts. Please wait a moment and try again.',
+    booker_location_filter_all: 'All locations',
+    booker_location_filter_label: 'Filter by location',
 
     login_title: 'Log in',
     login_username: 'Username',
@@ -292,24 +354,30 @@ const DICT = {
     schedule_template_hint: 'Editing this template does not retroactively change already-activated weeks — use "Re-apply template" on a week to update it.',
     schedule_template_add_weekday: 'Day',
     schedule_template_add_time: 'Start time',
+    schedule_template_add_location: 'Location',
     schedule_template_add_btn: 'Add time slot',
     schedule_template_empty: 'No time slots in the weekly template yet',
     schedule_template_entry_exists: 'That time slot already exists',
+    schedule_template_added: 'Time slot added',
+    schedule_template_removed: 'Time slot removed',
+    schedule_bulk_done: 'Opened booking for the next {n} week(s)',
+    schedule_template_no_locations_hint: 'Add a location in Settings before creating a schedule entry.',
     schedule_weeks_title: 'Activate / deactivate weeks',
     schedule_weeks_activate: 'Activate',
     schedule_weeks_deactivate: 'Deactivate',
     schedule_weeks_reapply: 'Re-apply template',
     schedule_weeks_activated_chip: 'Active',
-    schedule_bulk_title: 'Activate several weeks ahead',
     schedule_bulk_weeks_label: 'Number of weeks',
     schedule_bulk_btn: 'Activate all',
 
     calendar_legend_free: 'Free', calendar_legend_booked: 'Booked', calendar_legend_blocked: 'Blocked',
     calendar_count_free: '{n} free', calendar_count_booked: '{n} booked', calendar_count_blocked: '{n} blocked',
+    calendar_filter_all_locations: 'All locations',
     day_panel_title: 'Details for {date}',
     day_panel_empty: 'No slots on this day',
     day_panel_add_slot: 'Add slot outside template',
     day_panel_add_slot_time: 'Time',
+    day_panel_add_slot_location: 'Location',
     day_panel_add_slot_blocked: 'Block immediately',
     day_panel_slot_free: 'Free',
     day_panel_slot_blocked: 'Blocked',
@@ -318,7 +386,8 @@ const DICT = {
     day_panel_slot_unblock: 'Unblock',
     day_panel_slot_delete: 'Remove this slot',
     day_panel_slot_delete_confirm: 'Remove this slot?',
-    day_panel_slot_booked_by: 'Booked by {name}',
+    day_panel_slot_added: 'Slot added',
+    day_panel_booking_cancelled: 'Booking cancelled',
     day_panel_booking_edit: 'Edit details',
     day_panel_booking_move: 'Move time',
     day_panel_booking_cancel: 'Cancel booking',
@@ -328,12 +397,15 @@ const DICT = {
     move_modal_title: 'Move to which time?',
     move_modal_none: 'No other free slots today',
     move_modal_conflict: 'Could not move — that time conflicts with another booking',
+    move_modal_moved: 'Lesson moved',
+    move_modal_hint: 'Pick an open time on the same day to move this booking to.',
     booking_conflict: 'That slot is no longer available',
 
     notif_empty: 'No notifications yet',
     notif_new_booking: '{name} booked {time}',
     notif_new_cancel: '{name} cancelled {time}',
     notif_go_to_day: 'Go to this day',
+    notif_unread_count: '{n} unread notification(s)',
 
     log_filter_type: 'Type', log_filter_actor: 'Actor', log_filter_month: 'Month',
     log_type_all: 'All',
@@ -346,6 +418,17 @@ const DICT = {
     log_month_note: 'Filters by when the action happened, not the lesson date.',
 
     settings_display_name: 'Teacher name',
+    settings_locations_title: 'Locations',
+    settings_locations_hint: 'Manage the studio locations you teach at.',
+    settings_locations_add_label: 'Location name',
+    settings_locations_add_btn: 'Add location',
+    settings_locations_empty: 'No locations yet.',
+    settings_locations_in_use: "Can't delete — this location is still in use by a template or slot.",
+    settings_locations_added: 'Location added',
+    settings_locations_removed: 'Location removed',
+    settings_locations_delete_confirm: 'Delete the location "{name}"?',
+    settings_share_copy_manual: "Couldn't copy automatically — press Ctrl/Cmd+C",
+    settings_slug_saved: 'New link saved',
     settings_slug_title: 'Booking page link',
     settings_slug_current: 'Current link',
     settings_slug_custom: 'Set a custom link',
@@ -357,6 +440,12 @@ const DICT = {
     settings_slug_confirm_title: 'Confirm link change',
     settings_slug_confirm_body: "The old link will stop working immediately. If you've shared it on LINE or elsewhere, students won't be able to reach it anymore. Continue?",
     settings_share_copy: 'Copy link',
+    settings_reset_title: 'Reset settings',
+    settings_reset_hint: 'Clears the schedule template and all locations, and issues a fresh booking link.',
+    settings_reset_btn: 'Reset to default',
+    settings_reset_confirm_title: 'Reset all settings?',
+    settings_reset_confirm_body: 'This clears your schedule template, removes all locations (restoring the default one), and issues a fresh booking link — the old link stops working. Existing bookings are kept. Continue?',
+    settings_reset_done: 'Settings reset to default',
 
     owner_title: 'Manage teacher accounts',
     owner_admins_empty: 'No teacher accounts yet',
@@ -370,11 +459,26 @@ const DICT = {
     owner_admin_new_password: 'New password (optional)',
     owner_admin_delete_confirm: "Delete {name}'s account? All schedules, bookings, and history will be permanently removed.",
     owner_admin_slug_label: 'Link',
+    owner_admin_created: "Created {name}'s account",
+    owner_admin_saved: 'Changes saved',
+    owner_admin_deleted: 'Account deleted',
+    owner_admin_password_hint: 'Leave blank to keep the current password',
+
+    landing_title: 'Suvida Piano Studio',
+    landing_body: "Students book through their teacher's own link — ask your teacher for theirs.",
+    landing_teacher_login: 'Teacher login',
+    landing_owner_login: 'Owner login',
 
     error_invalid_request: 'Invalid request',
     error_unauthorized: 'Please log in again',
     error_not_found: 'Not found',
     error_rate_limited: 'Too many attempts. Please wait a moment.',
+    error_slot_unavailable: 'Sorry — that time was just booked. Please choose another.',
+    error_cannot_cancel: 'This booking can no longer be cancelled (cancellations close 24 hours before the lesson).',
+    error_invalid_credentials: 'Incorrect username or password',
+    error_invalid_location: 'That location could not be found',
+    error_location_in_use: 'This location is still used by a schedule or booking, so it cannot be deleted.',
+    error_slug_taken: 'That link is already taken. Please choose another.',
   },
 };
 
@@ -422,21 +526,23 @@ document.documentElement.lang = I18N.lang;
 // Mounts a TH/EN toggle control into `container` (a DOM node); call after
 // the shell markup exists.
 function mountLangToggle(container) {
+  // .chip-group collapses the two chips into one segmented control (a single
+  // shared outline) instead of two adjacent boxes forced together by a
+  // zero gap set from JS.
   const wrap = document.createElement('div');
-  wrap.className = 'row';
-  wrap.style.gap = '0';
+  wrap.className = 'chip-group';
   wrap.setAttribute('role', 'group');
   wrap.setAttribute('aria-label', 'Language');
 
   const thBtn = document.createElement('button');
   thBtn.type = 'button';
   thBtn.className = 'chip';
-  thBtn.textContent = 'ไทย';
+  thBtn.textContent = DICT.th.lang_toggle_th;
 
   const enBtn = document.createElement('button');
   enBtn.type = 'button';
   enBtn.className = 'chip';
-  enBtn.textContent = 'EN';
+  enBtn.textContent = DICT.en.lang_toggle_en;
 
   function refresh() {
     thBtn.setAttribute('aria-pressed', String(I18N.lang === 'th'));

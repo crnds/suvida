@@ -22,6 +22,15 @@ CREATE TABLE IF NOT EXISTS admins (
   notifications_seen_event_id INTEGER NOT NULL DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS locations (
+  id INTEGER PRIMARY KEY,
+  admin_id INTEGER NOT NULL REFERENCES admins(id),
+  title TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS ix_locations_admin ON locations(admin_id);
+
 CREATE TABLE IF NOT EXISTS sessions (
   token TEXT PRIMARY KEY,
   role TEXT NOT NULL CHECK(role IN ('owner','admin')),
@@ -138,6 +147,48 @@ CREATE TRIGGER IF NOT EXISTS trg_ev_edited AFTER UPDATE OF booker_name, booker_p
 END;
 `;
 
+// SQLite can't add a NOT NULL column without a DEFAULT to a non-empty table
+// in one step, and ADD COLUMN has no IF NOT EXISTS form — so this has to be
+// an imperative, PRAGMA-checked step rather than plain SQL text in SCHEMA.
+// Both columns stay nullable at the schema level (same "declared, not
+// enforced" posture as this codebase's other FK columns); the guarantee
+// that every row has one comes from every INSERT path always supplying it,
+// backed up by backfillDefaultLocations below for pre-existing rows.
+async function ensureLocationColumns(client) {
+  const t = await client.execute('PRAGMA table_info(templates)');
+  const s = await client.execute('PRAGMA table_info(slots)');
+  if (!t.rows.some((r) => r.name === 'location_id')) {
+    await client.execute('ALTER TABLE templates ADD COLUMN location_id INTEGER REFERENCES locations(id)');
+  }
+  if (!s.rows.some((r) => r.name === 'location_id')) {
+    await client.execute('ALTER TABLE slots ADD COLUMN location_id INTEGER REFERENCES locations(id)');
+  }
+}
+
+// One-time backfill for admins/rows that predate the locations feature.
+// Idempotent: every guard here (NOT EXISTS / location_id IS NULL) matches
+// nothing once the backfill has already run, so re-running is a no-op.
+async function backfillDefaultLocations(client) {
+  const now = Math.floor(Date.now() / 1000);
+  await client.execute({
+    sql: `INSERT INTO locations (admin_id, title, created_at)
+          SELECT a.id, 'Studio', ?
+            FROM admins a
+           WHERE NOT EXISTS (SELECT 1 FROM locations l WHERE l.admin_id = a.id)`,
+    args: [now],
+  });
+  await client.execute(`
+    UPDATE templates
+       SET location_id = (SELECT MIN(id) FROM locations l WHERE l.admin_id = templates.admin_id)
+     WHERE location_id IS NULL
+  `);
+  await client.execute(`
+    UPDATE slots
+       SET location_id = (SELECT MIN(id) FROM locations l WHERE l.admin_id = slots.admin_id)
+     WHERE location_id IS NULL
+  `);
+}
+
 async function main() {
   const url = process.env.TURSO_DATABASE_URL;
   if (!url) {
@@ -146,6 +197,8 @@ async function main() {
   }
   const client = createClient({ url, authToken: process.env.TURSO_AUTH_TOKEN });
   await client.executeMultiple(SCHEMA);
+  await ensureLocationColumns(client);
+  await backfillDefaultLocations(client);
   client.close();
   console.log('migrate: schema up to date.');
 }

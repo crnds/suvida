@@ -1,0 +1,720 @@
+// Browser QA for public/ — the front-end's safety net.
+//
+// scripts/smoke.js covers the API and never touches the DOM, so nothing else
+// in this repo would catch a broken booking flow, a modal that traps focus in
+// the wrong place, a row that overflows a phone, or text below AA contrast.
+//
+//   node scripts/uiqa.js [flows] [a11y] [shots] [all] [options]
+//
+//   flows   drives the real journeys and asserts behaviour (exit 1 on failure)
+//   a11y    contrast, labels, accessible names, heading order (exit 1)
+//   shots   screenshots every page at several widths and reports overflow,
+//           console errors and undersized tap targets (writes files)
+//   all     all three
+//   (default: flows + a11y — the two that can fail)
+//
+//   --base=http://localhost:3000   server to test
+//   --lang=th|en                   UI language (shots; default th)
+//   --out=DIR                      screenshot directory (shots)
+//   --only=NAME                    run one shots target
+//   --widths=375,768               override screenshot widths
+//
+// Requires a running server (`npm run dev`) and the QA dataset
+// (`npm run seed:qa`). Chrome is located via CHROME_PATH or the usual
+// per-platform install locations.
+import { mkdirSync } from 'node:fs';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+
+let puppeteer;
+try {
+  puppeteer = (await import('puppeteer-core')).default;
+} catch {
+  console.error('puppeteer-core is not installed. Run: npm install');
+  process.exit(1);
+}
+
+// ── config ──────────────────────────────────────────────────
+
+const argv = process.argv.slice(2);
+const flag = (name, fallback) => {
+  const hit = argv.find((a) => a.startsWith(`--${name}=`));
+  return hit ? hit.slice(name.length + 3) : fallback;
+};
+
+const BASE = flag('base', process.env.SMOKE_BASE_URL || 'http://localhost:3000');
+const LANG = flag('lang', 'th');
+const OUT = flag('out', './qa-shots');
+const ONLY = flag('only', null);
+const WIDTHS = flag('widths', '375,768,1280').split(',').map(Number);
+
+const SLUG = process.env.QA_SLUG || 'ployxx';
+const TEACHER = process.env.QA_USERNAME || 'kruploy';
+const TEACHER_PASSWORD = process.env.QA_PASSWORD || 'teacher123';
+const OWNER = process.env.OWNER_USERNAME || 'owner';
+const OWNER_PASSWORD = process.env.OWNER_PASSWORD || 'change-me';
+
+const CHROME_CANDIDATES = [
+  process.env.CHROME_PATH,
+  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  '/Applications/Chromium.app/Contents/MacOS/Chromium',
+  '/usr/bin/google-chrome',
+  '/usr/bin/chromium',
+  '/usr/bin/chromium-browser',
+  'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+].filter(Boolean);
+
+const CHROME = CHROME_CANDIDATES.find((p) => existsSync(p));
+if (!CHROME) {
+  console.error(`No Chrome found. Set CHROME_PATH. Looked in:\n  ${CHROME_CANDIDATES.join('\n  ')}`);
+  process.exit(1);
+}
+
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// ── result tracking ─────────────────────────────────────────
+
+let pass = 0;
+let fail = 0;
+function check(name, ok, detail) {
+  if (ok) { pass++; console.log(`PASS  ${name}`); }
+  else { fail++; console.log(`FAIL  ${name}${detail ? `  → ${detail}` : ''}`); }
+}
+
+// ── browser helpers ─────────────────────────────────────────
+
+const browser = await puppeteer.launch({
+  executablePath: CHROME,
+  headless: 'shell',
+  args: ['--no-sandbox', '--font-render-hinting=none'],
+});
+
+async function newPage({ width = 390, height = 900, lang } = {}) {
+  const page = await browser.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  page.on('console', (m) => {
+    // 401 on /admin/me before login and a missing favicon are both expected.
+    if (m.type() === 'error' && !/40[14]|Failed to load resource/.test(m.text())) errors.push(m.text());
+  });
+  await page.setViewport({ width, height, deviceScaleFactor: 1 });
+  // Screenshots resize the viewport, which restarts CSS entry animations and
+  // can catch a modal mid-fade; reduced motion makes every capture settled.
+  await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduce' }]);
+  if (lang) {
+    await page.evaluateOnNewDocument((l) => localStorage.setItem('suvida_v1_lang', l), lang);
+  }
+  page.errors = errors;
+  return page;
+}
+
+// Log in over HTTP once and reuse the cookie. Logging in per page trips the
+// API's 10-per-60s login limit and cascades into unrelated failures.
+const sessionCache = new Map();
+async function sessionCookie(path, body) {
+  const key = path + JSON.stringify(body);
+  if (!sessionCache.has(key)) {
+    const res = await fetch(BASE + path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const raw = res.headers.get('set-cookie') || '';
+    const m = /suvida_session=([^;]+)/.exec(raw);
+    if (!m) throw new Error(`login failed (${res.status}): ${raw || await res.text()}`);
+    sessionCache.set(key, m[1]);
+  }
+  return sessionCache.get(key);
+}
+
+async function signIn(page, role = 'admin') {
+  const [path, body] = role === 'owner'
+    ? ['/api/owner/login', { username: OWNER, password: OWNER_PASSWORD, remember: true }]
+    : ['/api/admin/login', { username: TEACHER, password: TEACHER_PASSWORD, remember: true }];
+  const value = await sessionCookie(path, body);
+  await page.setCookie({ name: 'suvida_session', value, domain: new URL(BASE).hostname, path: '/' });
+}
+
+async function signOut(page) {
+  const cookies = await page.cookies(BASE);
+  if (cookies.length) await page.deleteCookie(...cookies);
+}
+
+// ── flows: the real journeys ────────────────────────────────
+
+async function runFlows() {
+  console.log('\n=== flows ===');
+
+  // 1. Student books a lesson, end to end.
+  {
+    const page = await newPage();
+    await page.goto(`${BASE}/b/${SLUG}`, { waitUntil: 'networkidle2' });
+    await page.waitForSelector('.calendar-day:not(:disabled)');
+
+    await page.click('.calendar-day:not(:disabled)');
+    await page.waitForSelector('.slot-list__item');
+    check('booker: tapped day gets a selected state',
+      await page.$eval('.calendar-day.is-selected', (n) => !!n).catch(() => false));
+    check('booker: focus moves into the day dialog',
+      await page.evaluate(() => !!document.activeElement.closest('.modal')));
+    check('booker: background scroll locked while a sheet is open',
+      await page.evaluate(() => document.body.classList.contains('is-modal-open')));
+
+    await page.click('.slot-list__item');
+    await page.waitForSelector('#booking-form');
+    check('booker: booking form offers a way back to the slot list',
+      await page.$eval('.modal__back', (n) => !!n).catch(() => false));
+
+    await page.type('#bf-name', 'QA Student');
+    await page.type('#bf-phone', 'abc');
+    await page.click('#bf-submit');
+    await wait(300);
+    check('booker: rejects a non-numeric phone',
+      await page.$eval('#bf-phone', (n) => n.getAttribute('aria-invalid') === 'true').catch(() => false));
+    check('booker: invalid field receives focus',
+      await page.evaluate(() => document.activeElement.id === 'bf-phone'));
+
+    await page.click('#bf-phone', { clickCount: 3 });
+    await page.type('#bf-phone', '0891112233');
+    await page.click('#bf-submit');
+    await page.waitForFunction(() => !!document.querySelector('.fa-circle-check'), { timeout: 8000 });
+    check('booker: booking succeeds and shows a confirmation', true);
+
+    await page.click('.modal .btn-primary');
+    await wait(500);
+    check('booker: confirmation sends the student to their bookings',
+      await page.$eval('#tab-btn-history', (n) => n.getAttribute('aria-selected') === 'true'));
+    check('booker: the new booking appears in history',
+      (await page.$$('#local-bookings .list-row')).length > 0);
+
+    // The details were typed once already; a second booking must not ask again.
+    await page.click('#tab-btn-book');
+    await page.waitForSelector('.calendar-day:not(:disabled)');
+    await page.click('.calendar-day:not(:disabled)');
+    await page.waitForSelector('.slot-list__item');
+    await page.click('.slot-list__item');
+    await page.waitForSelector('#bf-name');
+    const prefill = await page.evaluate(() => [
+      document.querySelector('#bf-name').value,
+      document.querySelector('#bf-phone').value,
+    ]);
+    check('booker: name and phone are prefilled from the last booking',
+      prefill[0] === 'QA Student' && prefill[1] === '0891112233', prefill.join('|'));
+
+    // Modals stack, so Escape unwinds one level at a time.
+    await page.keyboard.press('Escape');
+    await wait(250);
+    check('booker: Escape pops the form back to the slot list',
+      (await page.$$('#modal-root .modal-overlay:not(.hidden)')).length === 1 && !!(await page.$('.slot-list__item')));
+    await page.keyboard.press('Escape');
+    await wait(250);
+    check('booker: a second Escape closes the sheet', (await page.$$('.modal')).length === 0);
+    check('booker: scroll lock released',
+      await page.evaluate(() => !document.body.classList.contains('is-modal-open')));
+
+    check('booker: no console errors', page.errors.length === 0, page.errors.join(' | '));
+    await page.close();
+  }
+
+  // 2. An open modal must not be stranded in the previous language.
+  {
+    const page = await newPage();
+    await page.goto(`${BASE}/b/${SLUG}`, { waitUntil: 'networkidle2' });
+    await page.waitForSelector('.calendar-day:not(:disabled)');
+    await page.click('.calendar-day:not(:disabled)');
+    await page.waitForSelector('.slot-list__item');
+    const before = await page.$eval('.modal__title', (n) => n.textContent);
+    // The overlay covers the header (correctly), so the toggle is not
+    // clickable while a sheet is open — drive the same code path directly.
+    await page.evaluate(() => I18N.setLang('en'));
+    await wait(900);
+    const after = await page.$eval('.modal__title', (n) => n.textContent).catch(() => null);
+    check('booker: an open modal follows the language switch',
+      after && after !== before && /Open times/.test(after), `${before} -> ${after}`);
+    check('booker: no console errors on language switch', page.errors.length === 0, page.errors.join(' | '));
+    await page.close();
+  }
+
+  // 3. A failed month must not be a dead end.
+  {
+    const page = await newPage();
+    await page.setRequestInterception(true);
+    let blocked = true;
+    page.on('request', (req) => {
+      if (blocked && req.url().includes('/api/public/page')) return req.abort();
+      req.continue();
+    });
+    await page.goto(`${BASE}/b/${SLUG}`, { waitUntil: 'domcontentloaded' });
+    await wait(1500);
+    check('booker: month nav survives a failed load',
+      (await page.$$('.calendar-nav .btn')).length === 2);
+    const retry = await page.$('#calendar .btn-secondary');
+    check('booker: a retry button is offered', !!retry);
+    if (retry) {
+      blocked = false;
+      await retry.click();
+      await page.waitForSelector('.calendar-day', { timeout: 8000 });
+      check('booker: retry recovers the month', true);
+    }
+    await page.close();
+  }
+
+  // 4. The detached-node regression: a modal opened from inside the day panel
+  // used to destroy the panel, so every later refresh painted into an orphan.
+  // Editing a booking is used because it cannot fail with a 409.
+  {
+    const page = await newPage({ width: 1100 });
+    await signIn(page);
+    await page.goto(`${BASE}/admin/`, { waitUntil: 'networkidle2' });
+    await page.waitForSelector('.calendar-day:not(:disabled)', { timeout: 8000 });
+
+    let opened = false;
+    for (const day of await page.$$('.calendar-day:not(:disabled)')) {
+      await day.click();
+      await page.waitForSelector('.modal .list', { timeout: 5000 });
+      await wait(400);
+      // Only a booked row carries the edit/move/cancel trio.
+      if (await page.$('.modal .list-row .btn-destructive')) { opened = true; break; }
+      await page.keyboard.press('Escape');
+      await wait(200);
+    }
+    check('admin: found a day with an existing booking', opened);
+
+    if (opened) {
+      const before = await page.$$eval('.modal .list-row', (n) => n.length);
+      const newName = `QA Edited ${Date.now() % 100000}`;
+
+      await page.evaluate(() => {
+        const row = [...document.querySelectorAll('.modal .list-row')]
+          .find((r) => r.querySelector('.btn-destructive'));
+        row.querySelector('.list-row__actions .btn').click();
+      });
+      await page.waitForSelector('#bk-name', { timeout: 5000 });
+      check('admin: two modals are stacked, day panel not destroyed',
+        (await page.$$('#modal-root .modal-overlay')).length === 2);
+      check('admin: the parked day panel is still in the document',
+        await page.evaluate(() => document.querySelectorAll('#modal-root .modal-overlay.hidden').length === 1));
+
+      await page.click('#bk-name', { clickCount: 3 });
+      await page.type('#bk-name', newName);
+      await page.click('.modal .btn-primary[type="submit"]');
+      await wait(2000);
+
+      check('admin: day panel is back on top after the nested modal closes',
+        (await page.$$('#modal-root .modal-overlay:not(.hidden)')).length === 1);
+      check('admin: day panel refreshed and shows the edited booking',
+        await page.evaluate((n) => [...document.querySelectorAll('.modal .list-row')]
+          .some((r) => r.textContent.includes(n)), newName));
+      check('admin: row count preserved',
+        (await page.$$eval('.modal .list-row', (n) => n.length)) === before);
+    }
+    check('admin: no console errors', page.errors.length === 0, page.errors.join(' | '));
+    await page.close();
+  }
+
+  // 5. Re-labelling the log filters must not silently reset them.
+  {
+    const page = await newPage({ width: 1100 });
+    await signIn(page);
+    await page.goto(`${BASE}/admin/`, { waitUntil: 'networkidle2' });
+    await page.click('#tab-btn-log');
+    await wait(1200);
+    await page.select('#log-type', 'cancelled');
+    await wait(900);
+    await page.click('#lang-toggle .chip:last-child');
+    await wait(700);
+    const value = await page.$eval('#log-type', (n) => n.value);
+    check('admin: log filter keeps its value across a language switch', value === 'cancelled', `value=${value}`);
+    check('admin: log filter labels were translated',
+      /Cancelled/i.test(await page.$eval('#log-type option[value="cancelled"]', (n) => n.textContent)));
+    await page.close();
+  }
+
+  // 6. The ARIA tabs pattern the markup claims.
+  {
+    const page = await newPage({ width: 1100 });
+    await signIn(page);
+    await page.goto(`${BASE}/admin/`, { waitUntil: 'networkidle2' });
+    await page.waitForSelector('#tab-btn-calendar');
+    await page.focus('#tab-btn-calendar');
+    await page.keyboard.press('ArrowRight');
+    await wait(300);
+    check('admin: arrow keys move between tabs in visual order',
+      await page.$eval('#tab-btn-schedule', (n) => n.getAttribute('aria-selected') === 'true'));
+    check('admin: panels are linked to their tabs',
+      await page.$eval('#tab-btn-schedule', (n) => n.getAttribute('aria-controls') === 'tab-schedule'));
+    check('admin: roving tabindex — only the active tab is a stop',
+      await page.$eval('#tab-btn-calendar', (n) => n.getAttribute('tabindex') === '-1'));
+    await page.close();
+  }
+
+  // 7. Errors say what actually went wrong.
+  {
+    const page = await newPage();
+    await signOut(page);
+    await page.goto(`${BASE}/admin/`, { waitUntil: 'networkidle2' });
+    await page.waitForSelector('#login-username', { visible: true });
+    await page.type('#login-username', TEACHER);
+    await page.type('#login-password', 'definitely-wrong');
+    await page.click('#login-submit');
+    await wait(1200);
+    const text = await page.$eval('#login-error', (n) => n.textContent);
+    check('admin: a wrong password says so, not "something went wrong"',
+      /ไม่ถูกต้อง|Incorrect/i.test(text), text);
+    await page.close();
+  }
+
+  // 8. The race the backend is architected around, surfaced to the student.
+  {
+    const page = await newPage();
+    await page.goto(`${BASE}/b/${SLUG}`, { waitUntil: 'networkidle2' });
+    await page.waitForSelector('.calendar-day:not(:disabled)');
+    await page.click('.calendar-day:not(:disabled)');
+    await page.waitForSelector('.slot-list__item');
+    await page.click('.slot-list__item');
+    await page.waitForSelector('#bf-submit');
+    await page.setRequestInterception(true);
+    page.on('request', (req) => {
+      if (req.url().includes('/api/public/book')) {
+        return req.respond({
+          status: 409,
+          contentType: 'application/json',
+          body: JSON.stringify({ error: 'slot_unavailable' }),
+        });
+      }
+      req.continue();
+    });
+    await page.click('#bf-name', { clickCount: 3 }); await page.type('#bf-name', 'QA Conflict');
+    await page.click('#bf-phone', { clickCount: 3 }); await page.type('#bf-phone', '0890000009');
+    await page.click('#bf-submit');
+    await wait(1200);
+    const banner = await page.$eval('.modal .banner--error', (n) => n.textContent).catch(() => '');
+    check('booker: a taken slot explains itself',
+      /เพิ่งถูกจอง|just booked/i.test(banner), banner || '(no banner)');
+    await page.close();
+  }
+
+  // 9. Settings reset: confirm dialog, then cancel — never actually reset
+  // the QA teacher (that would break /b/ployxx for the other flows).
+  {
+    const page = await newPage({ width: 1100 });
+    await signIn(page);
+    await page.goto(`${BASE}/admin/`, { waitUntil: 'networkidle2' });
+    await page.click('#tab-btn-settings');
+    await page.waitForSelector('#settings-reset-btn');
+    check('admin: settings reset button is present', !!(await page.$('#settings-reset-btn')));
+    const slugBefore = await page.$eval('#share-link', (n) => n.value);
+
+    await page.click('#settings-reset-btn');
+    await page.waitForSelector('.modal', { timeout: 5000 });
+    const title = await page.$eval('.modal__title', (n) => n.textContent);
+    check('admin: reset opens a confirm dialog',
+      /รีเซ็ตการตั้งค่า|Reset all settings/i.test(title), title);
+    check('admin: confirm uses a warning icon',
+      !!(await page.$('.modal .fa-triangle-exclamation')));
+
+    await page.click('.modal .btn-tertiary');
+    await wait(400);
+    check('admin: cancelling reset closes the dialog',
+      (await page.$$('.modal')).length === 0);
+    check('admin: cancelling reset leaves the share link unchanged',
+      (await page.$eval('#share-link', (n) => n.value)) === slugBefore);
+    check('admin: no console errors on reset-cancel', page.errors.length === 0, page.errors.join(' | '));
+    await page.close();
+  }
+
+  // 10. Full settings reset on a throwaway teacher (not the QA teacher).
+  {
+    const uname = `qa_reset_${Date.now()}`;
+    const password = 'resetpass1';
+    const ownerTok = await sessionCookie('/api/owner/login', { username: OWNER, password: OWNER_PASSWORD, remember: true });
+    const created = await fetch(BASE + '/api/owner/admins', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: `suvida_session=${ownerTok}` },
+      body: JSON.stringify({ username: uname, password, display_name: 'QA Reset' }),
+    });
+    const createdJson = await created.json();
+    check('admin: throwaway teacher created for reset', created.status === 201, JSON.stringify(createdJson));
+
+    const adminTok = await sessionCookie('/api/admin/login', { username: uname, password, remember: true });
+    const locRes = await fetch(BASE + '/api/admin/locations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: `suvida_session=${adminTok}` },
+      body: JSON.stringify({ title: 'Room QA' }),
+    });
+    const loc = await locRes.json();
+    await fetch(BASE + '/api/admin/template', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: `suvida_session=${adminTok}` },
+      body: JSON.stringify({ weekday: 1, start_minutes: 600, location_id: loc.id }),
+    });
+
+    const page = await newPage({ width: 1100 });
+    await page.setCookie({ name: 'suvida_session', value: adminTok, domain: new URL(BASE).hostname, path: '/' });
+    await page.goto(`${BASE}/admin/`, { waitUntil: 'networkidle2' });
+    await page.click('#tab-btn-settings');
+    await page.waitForSelector('#settings-reset-btn');
+    await wait(600);
+
+    const locCountBefore = (await page.$$('#location-list .list-row')).length;
+    check('admin: extra location is listed before reset', locCountBefore >= 1, `count=${locCountBefore}`);
+    const slugBefore = await page.$eval('#share-link', (n) => n.value);
+
+    await page.click('#settings-reset-btn');
+    await page.waitForSelector('.modal .btn-destructive');
+    await page.click('.modal .btn-destructive');
+    await page.waitForFunction(() => !document.querySelector('.modal'), { timeout: 8000 });
+    await wait(900);
+
+    const slugAfter = await page.$eval('#share-link', (n) => n.value);
+    check('admin: reset issues a new 6-letter share link',
+      slugAfter !== slugBefore && /\/b\/[a-z]{6}$/.test(slugAfter),
+      `${slugBefore} -> ${slugAfter}`);
+    const locText = await page.$eval('#location-list', (n) => n.textContent);
+    check('admin: after reset the location list is just Studio',
+      /Studio/.test(locText) && (await page.$$('#location-list .list-row')).length === 1,
+      locText.trim());
+    check('admin: success toast after reset',
+      await page.evaluate(() => [...document.querySelectorAll('.toast')]
+        .some((t) => /Settings reset|รีเซ็ตการตั้งค่าแล้ว/.test(t.textContent))));
+
+    await page.click('#tab-btn-schedule');
+    await wait(800);
+    const tmplText = await page.$eval('#template-list', (n) => n.textContent);
+    check('admin: template list is empty after reset',
+      /ยังไม่มีช่วงเวลา|No time slots/i.test(tmplText), tmplText.trim());
+    check('admin: no console errors on full reset', page.errors.length === 0, page.errors.join(' | '));
+    await page.close();
+  }
+}
+
+// ── a11y: contrast, names, labels, heading order ────────────
+
+// Runs in the page. Walks rendered text, resolves the effective background by
+// climbing to the first non-transparent ancestor, and applies the WCAG 2.1
+// contrast formula.
+const A11Y_PROBE = () => {
+  const srgb = (c) => { c /= 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
+  const lum = ([r, g, b]) => 0.2126 * srgb(r) + 0.7152 * srgb(g) + 0.0722 * srgb(b);
+  const parse = (s) => (s.match(/[\d.]+/g) || []).slice(0, 3).map(Number);
+  const ratio = (a, b) => {
+    const l1 = lum(a), l2 = lum(b);
+    return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+  };
+  function bgOf(el) {
+    let n = el;
+    while (n && n !== document.documentElement) {
+      const c = getComputedStyle(n).backgroundColor;
+      const alpha = (c.match(/[\d.]+/g) || [])[3];
+      if (c && c !== 'rgba(0, 0, 0, 0)' && alpha !== '0') return parse(c);
+      n = n.parentElement;
+    }
+    return parse(getComputedStyle(document.body).backgroundColor);
+  }
+
+  const lowContrast = [];
+  for (const el of document.querySelectorAll('body *')) {
+    if (!el.offsetParent && getComputedStyle(el).position !== 'fixed') continue;
+    // Disabled controls are exempt from contrast minimums (WCAG 1.4.3).
+    if (el.closest(':disabled, [aria-disabled="true"], .calendar-day--past')) continue;
+    const own = [...el.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent.trim()).join('');
+    if (!own) continue;
+    const cs = getComputedStyle(el);
+    const size = parseFloat(cs.fontSize);
+    const weight = parseInt(cs.fontWeight, 10) || 400;
+    const large = size >= 24 || (size >= 18.66 && weight >= 700);
+    const need = large ? 3 : 4.5;
+    const r = ratio(parse(cs.color), bgOf(el));
+    if (r < need) {
+      lowContrast.push({ text: own.slice(0, 32), size, ratio: +r.toFixed(2), need, cls: (el.className || '').toString().slice(0, 40) });
+    }
+  }
+
+  const visible = (el) => !!el.offsetParent;
+  return {
+    lowContrast,
+    imagesNoAlt: [...document.querySelectorAll('img:not([alt])')].filter(visible).length,
+    buttonsNoName: [...document.querySelectorAll('button')]
+      .filter((b) => visible(b) && !b.textContent.trim() && !b.getAttribute('aria-label'))
+      .map((b) => (b.className || '').toString().slice(0, 40)),
+    controlsNoLabel: [...document.querySelectorAll('input:not([type=hidden]), select, textarea')]
+      .filter((i) => visible(i)
+        && !i.getAttribute('aria-label')
+        && !(i.id && document.querySelector(`label[for="${i.id}"]`))
+        && !i.closest('label'))
+      .map((i) => i.id || i.name || i.type),
+    headings: [...document.querySelectorAll('h1,h2,h3,h4,h5,h6')].filter(visible).map((h) => +h.tagName[1]),
+  };
+};
+
+async function auditPage(name, path, prep, width = 375) {
+  const page = await newPage({ width });
+  if (path.startsWith('/admin')) await signIn(page, 'admin');
+  if (path.startsWith('/owner')) await signIn(page, 'owner');
+  await page.goto(BASE + path, { waitUntil: 'networkidle2' });
+  if (prep) await prep(page);
+  await wait(600);
+  const r = await page.evaluate(A11Y_PROBE);
+
+  check(`${name}: every button has an accessible name`,
+    r.buttonsNoName.length === 0, r.buttonsNoName.join(', '));
+  check(`${name}: every form control has a label`,
+    r.controlsNoLabel.length === 0, r.controlsNoLabel.join(', '));
+  check(`${name}: every image has alt text`, r.imagesNoAlt === 0, String(r.imagesNoAlt));
+  check(`${name}: all text meets WCAG AA contrast`,
+    r.lowContrast.length === 0,
+    r.lowContrast.slice(0, 5).map((l) => `${l.ratio}<${l.need} ${l.size}px "${l.text}"`).join(' | '));
+
+  // A page must start at h1 and never skip a level on the way down.
+  const skips = r.headings.filter((lvl, i) => i > 0 && lvl - r.headings[i - 1] > 1);
+  check(`${name}: heading order is h1-first with no skipped levels`,
+    r.headings.length > 0 && r.headings[0] === 1 && skips.length === 0,
+    r.headings.map((h) => `h${h}`).join(' > '));
+
+  await page.close();
+}
+
+async function runA11y() {
+  console.log('\n=== a11y ===');
+  await auditPage('booker', `/b/${SLUG}`);
+  await auditPage('booker@320', `/b/${SLUG}`, null, 320);
+  await auditPage('booker day', `/b/${SLUG}`, async (p) => {
+    await p.waitForSelector('.calendar-day:not(:disabled)');
+    await p.click('.calendar-day:not(:disabled)');
+    await p.waitForSelector('.slot-list__item');
+  });
+  await auditPage('booker history', `/b/${SLUG}`, (p) => p.click('#tab-btn-history'));
+  await auditPage('admin calendar', '/admin/');
+  await auditPage('admin schedule', '/admin/', (p) => p.click('#tab-btn-schedule'));
+  await auditPage('admin log', '/admin/', async (p) => { await p.click('#tab-btn-log'); await wait(900); });
+  await auditPage('admin settings', '/admin/', (p) => p.click('#tab-btn-settings'));
+  await auditPage('owner', '/owner/');
+  await auditPage('landing', '/');
+}
+
+// ── shots: screenshots + layout report ──────────────────────
+
+const LAYOUT_PROBE = () => {
+  const de = document.documentElement;
+  const overflow = de.scrollWidth > de.clientWidth
+    ? { scrollWidth: de.scrollWidth, clientWidth: de.clientWidth }
+    : null;
+  const culprits = [];
+  if (overflow) {
+    for (const el of document.querySelectorAll('body *')) {
+      const r = el.getBoundingClientRect();
+      if (r.width === 0) continue;
+      if (r.right > de.clientWidth + 1 || r.left < -1) {
+        culprits.push(`${el.tagName.toLowerCase()}.${(el.className || '').toString().split(' ')[0]} right=${Math.round(r.right)}`);
+      }
+    }
+  }
+  // Interactive elements below the 44px comfortable touch target. Reported,
+  // not failed: headless Chrome reports `pointer: fine`, so the coarse-pointer
+  // bump that a real phone gets is not applied here.
+  const small = [];
+  for (const el of document.querySelectorAll('button, a, input, select, [role="tab"]')) {
+    const r = el.getBoundingClientRect();
+    if (r.width === 0 || r.height === 0 || r.height >= 44) continue;
+    const label = (el.getAttribute('aria-label') || el.textContent || el.id || '').trim().slice(0, 28);
+    small.push(`${el.tagName.toLowerCase()}.${(el.className || '').toString().split(' ')[0]} ${Math.round(r.width)}x${Math.round(r.height)} "${label}"`);
+  }
+  return { overflow, culprits: [...new Set(culprits)].slice(0, 8), small: [...new Set(small)].slice(0, 12) };
+};
+
+// anon: true captures the signed-out view of a page that would otherwise be
+// auto-authenticated — without it the login screens have no coverage at all,
+// because /admin/ and /owner/ always render the app.
+async function shoot(name, path, prep, { anon = false } = {}) {
+  for (const width of WIDTHS) {
+    const page = await newPage({ width, height: width < 500 ? 812 : 900, lang: LANG });
+    if (anon) await signOut(page);
+    else if (path.startsWith('/admin')) await signIn(page, 'admin');
+    else if (path.startsWith('/owner')) await signIn(page, 'owner');
+    await page.goto(BASE + path, { waitUntil: 'networkidle2' });
+    if (prep) await prep(page, width);
+    await wait(350);
+
+    const r = await page.evaluate(LAYOUT_PROBE);
+    await page.screenshot({
+      path: join(OUT, `${name}-${LANG}-${width}.jpg`),
+      fullPage: true, type: 'jpeg', quality: 82,
+    });
+
+    check(`shots ${name}@${width}: no horizontal overflow`,
+      !r.overflow,
+      r.overflow ? `${r.overflow.scrollWidth}>${r.overflow.clientWidth} :: ${r.culprits.join(' | ')}` : '');
+    check(`shots ${name}@${width}: no console errors`,
+      page.errors.length === 0, page.errors.slice(0, 3).join(' | '));
+    if (r.small.length) console.log(`      note: ${r.small.length} sub-44px targets (fine-pointer render): ${r.small.slice(0, 4).join(' | ')}`);
+
+    await page.close();
+  }
+}
+
+async function runShots() {
+  console.log(`\n=== shots (${LANG}) → ${OUT} ===`);
+  mkdirSync(OUT, { recursive: true });
+
+  const openDay = async (p) => {
+    await p.waitForSelector('.calendar-day:not(:disabled)', { timeout: 5000 });
+    await p.click('.calendar-day:not(:disabled)');
+    await p.waitForSelector('.modal', { timeout: 5000 });
+  };
+
+  const targets = {
+    landing: () => shoot('landing', '/'),
+    booker: () => shoot('booker', `/b/${SLUG}`),
+    bookerday: () => shoot('bookerday', `/b/${SLUG}`, openDay),
+    bookerform: () => shoot('bookerform', `/b/${SLUG}`, async (p) => {
+      await openDay(p);
+      await p.waitForSelector('.slot-list__item', { timeout: 5000 });
+      await p.click('.slot-list__item');
+      await p.waitForSelector('#booking-form', { timeout: 5000 });
+    }),
+    bookerhistory: () => shoot('bookerhistory', `/b/${SLUG}`, (p) => p.click('#tab-btn-history')),
+    adminlogin: () => shoot('adminlogin', '/admin/', (p) => p.waitForSelector('#login-username', { visible: true }), { anon: true }),
+    ownerlogin: () => shoot('ownerlogin', '/owner/', (p) => p.waitForSelector('#login-username', { visible: true }), { anon: true }),
+    admincalendar: () => shoot('admincalendar', '/admin/', () => wait(400)),
+    adminday: () => shoot('adminday', '/admin/', async (p) => {
+      await openDay(p);
+      await p.waitForSelector('.modal .list', { timeout: 5000 });
+    }),
+    adminschedule: () => shoot('adminschedule', '/admin/', async (p) => {
+      await p.click('#tab-btn-schedule'); await wait(400);
+    }),
+    adminlog: () => shoot('adminlog', '/admin/', async (p) => {
+      await p.click('#tab-btn-log'); await wait(700);
+    }),
+    adminnotif: () => shoot('adminnotif', '/admin/', async (p) => {
+      await p.click('#tab-btn-notifications'); await wait(700);
+    }),
+    adminsettings: () => shoot('adminsettings', '/admin/', async (p) => {
+      await p.click('#tab-btn-settings'); await wait(400);
+    }),
+    owner: () => shoot('owner', '/owner/', () => wait(400)),
+  };
+
+  for (const [name, fn] of Object.entries(targets)) {
+    if (ONLY && name !== ONLY) continue;
+    try { await fn(); } catch (e) { check(`shots ${name}`, false, e.message); }
+  }
+}
+
+// ── run ─────────────────────────────────────────────────────
+
+const requested = argv.filter((a) => !a.startsWith('--'));
+const suites = requested.includes('all')
+  ? ['flows', 'a11y', 'shots']
+  : (requested.length ? requested : ['flows', 'a11y']);
+
+try {
+  if (suites.includes('flows')) await runFlows();
+  if (suites.includes('a11y')) await runA11y();
+  if (suites.includes('shots')) await runShots();
+} finally {
+  await browser.close();
+}
+
+console.log(`\n${pass} passed, ${fail} failed`);
+process.exit(fail ? 1 : 0);

@@ -5,12 +5,18 @@
   "scripts": {
     "migrate": "node scripts/migrate.js",
     "seed": "node scripts/seed.js",
-    "smoke": "node scripts/smoke.js"
+    "seed:qa": "node scripts/seed-qa.js",
+    "dev": "node scripts/devserver.js",
+    "smoke": "node scripts/smoke.js",
+    "qa": "node scripts/uiqa.js",
+    "qa:all": "node scripts/uiqa.js all",
+    "qa:shots": "node scripts/uiqa.js shots"
   },
   "dependencies": {
     "@libsql/client": "^0.18.0"
   },
   "devDependencies": {
+    "puppeteer-core": "^23.11.1",
     "vercel": "^59.11.7"
   }
 }

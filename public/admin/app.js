@@ -16,6 +16,13 @@ const STATE = {
   logCursor: null,
   logOrderDesc: true,
   logFilters: {},
+  locations: [],
+  calendarLocationFilter: null,
+  unreadCount: 0,
+  // The open day panel, so nested modals can refresh it after they close.
+  dayPanel: null,
+  // Rapid month paging fires overlapping requests; only the newest may paint.
+  monthToken: 0,
 };
 
 const els = {
@@ -50,11 +57,18 @@ const els = {
   templateForm: document.getElementById('template-form'),
   tfWeekday: document.getElementById('tf-weekday'),
   tfTime: document.getElementById('tf-time'),
+  tfLocation: document.getElementById('tf-location'),
   templateError: document.getElementById('template-error'),
   bulkForm: document.getElementById('bulk-form'),
   bulkWeeks: document.getElementById('bulk-weeks'),
   weeksList: document.getElementById('weeks-list'),
 
+  locationList: document.getElementById('location-list'),
+  locationForm: document.getElementById('location-form'),
+  locTitle: document.getElementById('loc-title'),
+  locationError: document.getElementById('location-error'),
+
+  adminLocationFilter: document.getElementById('admin-location-filter'),
   adminCalendar: document.getElementById('admin-calendar'),
 
   notificationsList: document.getElementById('notifications-list'),
@@ -70,12 +84,18 @@ const els = {
   settingsDisplayName: document.getElementById('settings-display-name'),
   shareLink: document.getElementById('share-link'),
   shareCopyBtn: document.getElementById('share-copy-btn'),
+  shareCopyLabel: document.getElementById('share-copy-label'),
   slugForm: document.getElementById('slug-form'),
   slugInput: document.getElementById('slug-input'),
+  slugSubmit: document.getElementById('slug-submit'),
   slugError: document.getElementById('slug-error'),
   slugRegenerateBtn: document.getElementById('slug-regenerate-btn'),
-
-  modalRoot: document.getElementById('modal-root'),
+  settingsResetBtn: document.getElementById('settings-reset-btn'),
+  logOrderLabel: document.getElementById('log-order-label'),
+  loginSubmit: document.getElementById('login-submit'),
+  tfSubmit: document.getElementById('tf-submit'),
+  bulkSubmit: document.getElementById('bulk-submit'),
+  locSubmit: document.getElementById('loc-submit'),
 };
 
 mountLangToggle(document.getElementById('lang-toggle'));
@@ -86,51 +106,21 @@ document.addEventListener('i18n:changed', () => {
   renderWeeks();
   renderCalendar();
   renderLog();
+  renderLocations();
+  renderLocationFilterBar();
+  els.shareCopyLabel.textContent = I18N.t('settings_share_copy');
+  els.adminLocationFilter.setAttribute('aria-label', I18N.t('calendar_filter_all_locations'));
   if (STATE.admin) els.brand.textContent = STATE.admin.display_name;
 });
 
-// ── Modal helper ───────────────────────────────────────────
-
-function escHandler(e) { if (e.key === 'Escape') closeModal(); }
-function closeModal() { els.modalRoot.innerHTML = ''; document.removeEventListener('keydown', escHandler); }
-function showModal(title, bodyNode) {
-  els.modalRoot.innerHTML = '';
-  const overlay = document.createElement('div');
-  overlay.className = 'modal-overlay';
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) closeModal(); });
-  const modal = document.createElement('div');
-  modal.className = 'modal';
-  modal.setAttribute('role', 'dialog');
-  modal.setAttribute('aria-modal', 'true');
-  const header = document.createElement('div');
-  header.className = 'modal__header';
-  const h = document.createElement('h3');
-  h.className = 'text-h3';
-  h.textContent = title;
-  const closeBtn = document.createElement('button');
-  closeBtn.type = 'button';
-  closeBtn.className = 'modal__close';
-  closeBtn.textContent = '×';
-  closeBtn.setAttribute('aria-label', I18N.t('common_close'));
-  closeBtn.addEventListener('click', closeModal);
-  header.append(h, closeBtn);
-  modal.append(header, bodyNode);
-  overlay.appendChild(modal);
-  els.modalRoot.appendChild(overlay);
-  document.addEventListener('keydown', escHandler);
-}
-function errBanner(text) {
-  const div = document.createElement('div');
-  div.className = 'banner banner--error';
-  div.style.marginBottom = 'var(--space-2)';
-  div.textContent = text;
-  return div;
-}
-function messageForError(err) {
-  if (err.status === 429) return I18N.t('error_rate_limited');
-  if (err.status === 0) return I18N.t('common_error_network');
-  return I18N.t('common_error_generic');
-}
+// Modal, banner, toast and error-message helpers now live in shared/ui.js —
+// they used to be duplicated here, in owner/app.js and in b/page.js, and had
+// drifted apart. These aliases keep the call sites below readable.
+const showModal = (title, body, opts) => UI.showModal({ title, body, ...(opts || {}) });
+const closeModal = UI.closeModal;
+const messageForError = UI.messageForError;
+const showError = (container, err) =>
+  UI.showBanner(container, typeof err === 'string' ? err : UI.messageForError(err), 'error');
 
 // ── Auth ───────────────────────────────────────────────────
 
@@ -154,14 +144,26 @@ els.loginForm.addEventListener('submit', async (e) => {
   const username = els.loginUsername.value.trim();
   const password = els.loginPassword.value;
   const remember = els.loginRemember.checked;
-  try {
-    await Api.adminLogin(username, password, remember);
-    els.loginPassword.value = '';
-    await afterLogin();
-  } catch (err) {
-    els.loginError.textContent = err.status === 429 ? I18N.t('login_rate_limited') : I18N.t('login_invalid');
-    els.loginError.classList.remove('hidden');
-  }
+  await UI.withBusy(els.loginSubmit, async () => {
+    try {
+      await Api.adminLogin(username, password, remember);
+      els.loginPassword.value = '';
+      await afterLogin();
+    } catch (err) {
+      // A network failure is not a credentials problem; saying "wrong
+      // password" when the server is unreachable sends the user hunting for
+      // the wrong thing.
+      const message = err.status === 429 ? I18N.t('login_rate_limited')
+        : err.status === 0 ? I18N.t('common_error_network')
+        : I18N.t('login_invalid');
+      els.loginError.replaceChildren(
+        UI.icon('circle-exclamation'),
+        UI.el('span', { text: message })
+      );
+      els.loginError.classList.remove('hidden');
+      els.loginUsername.focus();
+    }
+  });
 });
 
 els.logoutBtn.addEventListener('click', () => {
@@ -177,27 +179,22 @@ async function afterLogin() {
   populateLogFilterSelects();
   setTab('calendar');
   loadSchedule();
+  loadLocations();
   startPolling();
   renderSettings();
 }
 
 // ── Tabs ───────────────────────────────────────────────────
+// wireTabs adds the parts the markup claimed but never had: aria-controls,
+// named panels, roving tabindex and arrow-key navigation.
 
-function setTab(tab) {
+const tabs = UI.wireTabs(els.tabBtns, els.tabSections, (tab) => {
   STATE.activeTab = tab;
-  Object.keys(els.tabBtns).forEach((k) => {
-    els.tabBtns[k].setAttribute('aria-selected', String(k === tab));
-    els.tabSections[k].classList.toggle('hidden', k !== tab);
-  });
   if (tab === 'calendar' && !els.adminCalendar.dataset.loaded) loadCalendarMonth();
   if (tab === 'notifications') loadNotifications();
   if (tab === 'log' && STATE.logEvents.length === 0) loadLog(true);
-}
-els.tabBtns.schedule.addEventListener('click', () => setTab('schedule'));
-els.tabBtns.calendar.addEventListener('click', () => setTab('calendar'));
-els.tabBtns.notifications.addEventListener('click', () => setTab('notifications'));
-els.tabBtns.log.addEventListener('click', () => setTab('log'));
-els.tabBtns.settings.addEventListener('click', () => setTab('settings'));
+});
+function setTab(tab) { tabs.select(tab); }
 
 // ── Schedule tab: template ───────────────────────────────────
 
@@ -211,7 +208,19 @@ function populateWeekdaySelect() {
   }
 }
 
+function populateLocationSelect(selectEl) {
+  selectEl.innerHTML = '';
+  STATE.locations.forEach((loc) => {
+    const opt = document.createElement('option');
+    opt.value = String(loc.id);
+    opt.textContent = loc.title;
+    selectEl.appendChild(opt);
+  });
+}
+
 async function loadSchedule() {
+  // The schedule tab used to render nothing at all while fetching.
+  UI.setLoading(els.templateList);
   try {
     const [tmpl, weeks] = await Promise.all([Api.listTemplate(), Api.listWeeks(8)]);
     STATE.template = tmpl.template || [];
@@ -220,103 +229,111 @@ async function loadSchedule() {
     renderTemplate();
     renderWeeks();
   } catch (err) {
-    els.templateList.innerHTML = '';
-    els.templateList.appendChild(errBanner(messageForError(err)));
+    showError(els.templateList, err);
+  } finally {
+    UI.doneLoading(els.templateList);
   }
 }
 
 function renderTemplate() {
-  els.templateList.innerHTML = '';
   if (STATE.template.length === 0) {
-    const empty = document.createElement('div');
-    empty.className = 'empty-state';
-    empty.textContent = I18N.t('schedule_template_empty');
-    els.templateList.appendChild(empty);
+    els.templateList.replaceChildren(UI.emptyState({
+      icon: 'table-list',
+      text: I18N.t('schedule_template_empty'),
+    }));
     return;
   }
   const sorted = [...STATE.template].sort((a, b) => a.weekday - b.weekday || a.start_minutes - b.start_minutes);
-  sorted.forEach((entry) => {
-    const row = document.createElement('div');
-    row.className = 'list-row list-row--static';
-    const left = document.createElement('div');
-    left.className = 'tabular-nums';
-    left.textContent = `${I18N.weekdayFull(entry.weekday)} · ${minutesToTimeInput(entry.start_minutes)}`;
-    const delBtn = document.createElement('button');
-    delBtn.type = 'button';
-    delBtn.className = 'btn btn-ghost btn-sm';
-    delBtn.textContent = I18N.t('common_delete');
-    delBtn.addEventListener('click', async () => {
-      try {
-        await Api.removeTemplateEntry(entry.id);
-        STATE.template = STATE.template.filter((t) => t.id !== entry.id);
-        renderTemplate();
-      } catch {
-        alert(I18N.t('common_error_generic'));
-      }
+  els.templateList.replaceChildren(...sorted.map((entry) => {
+    const loc = STATE.locations.find((l) => l.id === entry.location_id);
+    const delBtn = UI.button({
+      kind: 'tertiary', size: 'sm', iconOnly: true, icon: 'trash',
+      ariaLabel: I18N.t('common_delete'),
     });
-    row.append(left, delBtn);
-    els.templateList.appendChild(row);
-  });
+    const row = UI.listRow({
+      mainNode: UI.el('div', { class: 'tabular-nums', text: `${I18N.weekdayFull(entry.weekday)} · ${minutesToTimeInput(entry.start_minutes)}` }),
+      meta: loc ? loc.title : '',
+      actions: [delBtn],
+    });
+    delBtn.addEventListener('click', async () => {
+      await UI.withBusy(delBtn, async () => {
+        try {
+          await Api.removeTemplateEntry(entry.id);
+          STATE.template = STATE.template.filter((t) => t.id !== entry.id);
+          renderTemplate();
+          UI.toast('success', I18N.t('schedule_template_removed'));
+        } catch (err) {
+          UI.toastError(err);
+        }
+      });
+    });
+    return row;
+  }));
+}
+
+// Shows a message in a .field-error node, with an icon and an alert role.
+function setFieldMessage(node, message) {
+  if (!message) { node.classList.add('hidden'); node.replaceChildren(); return; }
+  node.replaceChildren(UI.icon('circle-exclamation'), UI.el('span', { text: message }));
+  node.classList.remove('hidden');
 }
 
 els.templateForm.addEventListener('submit', async (e) => {
   e.preventDefault();
-  els.templateError.classList.add('hidden');
+  setFieldMessage(els.templateError, '');
   const weekday = Number(els.tfWeekday.value);
   const start_minutes = timeInputToMinutes(els.tfTime.value);
-  try {
-    const created = await Api.addTemplateEntry(weekday, start_minutes);
-    STATE.template.push(created);
-    renderTemplate();
-  } catch (err) {
-    els.templateError.textContent = err.status === 409 ? I18N.t('schedule_template_entry_exists') : messageForError(err);
-    els.templateError.classList.remove('hidden');
+  const location_id = Number(els.tfLocation.value);
+  if (!Number.isInteger(location_id)) {
+    setFieldMessage(els.templateError, I18N.t('schedule_template_no_locations_hint'));
+    return;
   }
+  await UI.withBusy(els.tfSubmit, async () => {
+    try {
+      const created = await Api.addTemplateEntry(weekday, start_minutes, location_id);
+      STATE.template.push(created);
+      renderTemplate();
+      UI.toast('success', I18N.t('schedule_template_added'));
+    } catch (err) {
+      setFieldMessage(els.templateError,
+        err.status === 409 ? I18N.t('schedule_template_entry_exists') : messageForError(err));
+    }
+  });
 });
 
 // ── Schedule tab: weeks ──────────────────────────────────────
 
 function renderWeeks() {
-  els.weeksList.innerHTML = '';
-  STATE.weeks.forEach((week) => {
-    const row = document.createElement('div');
-    row.className = 'list-row list-row--static';
-    const left = document.createElement('div');
-    left.className = 'row';
-    left.innerHTML = `<span class="tabular-nums">${fmtDateLong(week.week_start_date)}</span>`;
-    if (week.activated) {
-      const chip = document.createElement('span');
-      chip.className = 'status-chip status-chip--booked';
-      chip.textContent = I18N.t('schedule_weeks_activated_chip');
-      left.appendChild(chip);
-    }
-    const actions = document.createElement('div');
-    actions.className = 'row';
-    if (week.activated) {
-      actions.appendChild(weekActionBtn(I18N.t('schedule_weeks_reapply'), 'btn-ghost', () => Api.reapplyWeek(week.week_start_date)));
-      actions.appendChild(weekActionBtn(I18N.t('schedule_weeks_deactivate'), 'btn-secondary', () => Api.deactivateWeek(week.week_start_date)));
-    } else {
-      actions.appendChild(weekActionBtn(I18N.t('schedule_weeks_activate'), 'btn-primary', () => Api.activateWeek(week.week_start_date)));
-    }
-    row.append(left, actions);
-    els.weeksList.appendChild(row);
-  });
+  els.weeksList.replaceChildren(...STATE.weeks.map((week) => {
+    const main = UI.el('div', { class: 'row' }, [
+      UI.el('span', { class: 'tabular-nums', text: fmtDateLong(week.week_start_date) }),
+      week.activated
+        ? UI.el('span', { class: 'status-chip status-chip--booked', text: I18N.t('schedule_weeks_activated_chip') })
+        : null,
+    ]);
+
+    const actions = week.activated
+      ? [
+          weekActionBtn(I18N.t('schedule_weeks_reapply'), 'tertiary', 'rotate', () => Api.reapplyWeek(week.week_start_date)),
+          weekActionBtn(I18N.t('schedule_weeks_deactivate'), 'secondary', 'lock', () => Api.deactivateWeek(week.week_start_date)),
+        ]
+      : [weekActionBtn(I18N.t('schedule_weeks_activate'), 'primary', 'lock-open', () => Api.activateWeek(week.week_start_date))];
+
+    return UI.listRow({ mainNode: main, actions });
+  }));
 }
 
-function weekActionBtn(label, cls, action) {
-  const btn = document.createElement('button');
-  btn.type = 'button';
-  btn.className = `btn ${cls} btn-sm`;
-  btn.textContent = label;
+function weekActionBtn(label, kind, icon, action) {
+  const btn = UI.button({ kind, size: 'sm', icon, label });
   btn.addEventListener('click', async () => {
-    btn.disabled = true;
-    try {
-      await action();
-      await loadSchedule();
-    } catch {
-      alert(I18N.t('common_error_generic'));
-      btn.disabled = false;
-    }
+    await UI.withBusy(btn, async () => {
+      try {
+        await action();
+        await loadSchedule();
+      } catch (err) {
+        UI.toastError(err);
+      }
+    });
   });
   return btn;
 }
@@ -325,13 +342,125 @@ els.bulkForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   const weeks = Number(els.bulkWeeks.value);
   if (!Number.isInteger(weeks) || weeks < 1) return;
-  try {
-    await Api.bulkActivate(weeks);
-    await loadSchedule();
-  } catch {
-    alert(I18N.t('common_error_generic'));
-  }
+  await UI.withBusy(els.bulkSubmit, async () => {
+    try {
+      await Api.bulkActivate(weeks);
+      await loadSchedule();
+      UI.toast('success', I18N.t('schedule_bulk_done', { n: weeks }));
+    } catch (err) {
+      UI.toastError(err);
+    }
+  });
 });
+
+// ── Locations (Settings list + Template/Calendar dropdowns + filter bars) ──
+
+async function loadLocations() {
+  UI.setLoading(els.locationList);
+  try {
+    const data = await Api.listLocations();
+    STATE.locations = data.locations || [];
+    renderLocations();
+    populateLocationSelect(els.tfLocation);
+    renderLocationFilterBar();
+    renderTemplate();
+  } catch (err) {
+    showError(els.locationList, err);
+  } finally {
+    UI.doneLoading(els.locationList);
+  }
+}
+
+function renderLocations() {
+  // Without a location there is nothing to attach a template entry to.
+  if (els.tfSubmit) els.tfSubmit.disabled = STATE.locations.length === 0;
+
+  if (STATE.locations.length === 0) {
+    els.locationList.replaceChildren(UI.emptyState({
+      icon: 'location-dot',
+      text: I18N.t('settings_locations_empty'),
+    }));
+    return;
+  }
+
+  els.locationList.replaceChildren(...STATE.locations.map((loc) => {
+    const delBtn = UI.button({
+      kind: 'tertiary', size: 'sm', iconOnly: true, icon: 'trash',
+      ariaLabel: `${I18N.t('common_delete')} — ${loc.title}`,
+    });
+    const row = UI.listRow({ main: loc.title, actions: [delBtn] });
+    delBtn.addEventListener('click', async () => {
+      const ok = await UI.confirm({
+        title: I18N.t('common_delete'),
+        message: I18N.t('settings_locations_delete_confirm', { name: loc.title }),
+        confirmLabel: I18N.t('common_delete'),
+      });
+      if (!ok) return;
+      await UI.withBusy(delBtn, async () => {
+        try {
+          await Api.removeLocation(loc.id);
+          STATE.locations = STATE.locations.filter((l) => l.id !== loc.id);
+          renderLocations();
+          populateLocationSelect(els.tfLocation);
+          renderLocationFilterBar();
+          UI.toast('success', I18N.t('settings_locations_removed'));
+        } catch (err) {
+          UI.toastError(err.status === 409 ? I18N.t('settings_locations_in_use') : err);
+        }
+      });
+    });
+    return row;
+  }));
+}
+
+els.locationForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  setFieldMessage(els.locationError, '');
+  const title = els.locTitle.value.trim();
+  if (!title) { els.locTitle.focus(); return; }
+  await UI.withBusy(els.locSubmit, async () => {
+    try {
+      const created = await Api.addLocation(title);
+      STATE.locations.push(created);
+      els.locTitle.value = '';
+      renderLocations();
+      populateLocationSelect(els.tfLocation);
+      renderLocationFilterBar();
+      UI.toast('success', I18N.t('settings_locations_added'));
+    } catch (err) {
+      setFieldMessage(els.locationError, messageForError(err));
+    }
+  });
+});
+
+// Filter bar is hidden entirely with 0-1 locations — nothing meaningful to
+// narrow down for a single-location studio.
+function renderLocationFilterBar() {
+  els.adminLocationFilter.replaceChildren();
+  els.adminLocationFilter.classList.toggle('hidden', STATE.locations.length <= 1);
+  if (STATE.locations.length <= 1) return;
+
+  const chip = (label, id) => {
+    const btn = UI.el('button', {
+      class: 'chip',
+      attrs: { type: 'button', 'aria-pressed': String(STATE.calendarLocationFilter === id) },
+    }, [
+      id === null ? UI.icon('layer-group') : UI.icon('location-dot'),
+      UI.el('span', { text: label }),
+    ]);
+    btn.addEventListener('click', () => setCalendarLocationFilter(id));
+    return btn;
+  };
+
+  els.adminLocationFilter.appendChild(chip(I18N.t('calendar_filter_all_locations'), null));
+  STATE.locations.forEach((loc) => els.adminLocationFilter.appendChild(chip(loc.title, loc.id)));
+}
+
+function setCalendarLocationFilter(id) {
+  STATE.calendarLocationFilter = id;
+  renderLocationFilterBar();
+  loadCalendarMonth();
+}
 
 // ── Calendar tab ─────────────────────────────────────────────
 
@@ -400,10 +529,18 @@ function renderCalendar() {
   });
 }
 
-async function loadCalendarMonth() {
-  els.adminCalendar.innerHTML = `<div class="loading-row"><span class="spinner"></span>${I18N.t('common_loading')}</div>`;
+// quiet=true refreshes without dropping the month back to a spinner — used
+// after a day-panel action, where the calendar is already on screen behind
+// the sheet.
+async function loadCalendarMonth(quiet) {
+  const token = ++STATE.monthToken;
+  if (!quiet) {
+    els.adminCalendar.setAttribute('aria-busy', 'true');
+    adminCal.renderMessage(STATE.month, UI.loadingRow());
+  }
   try {
-    const data = await Api.adminSlotsMonth(STATE.month);
+    const data = await Api.adminSlotsMonth(STATE.month, STATE.calendarLocationFilter);
+    if (token !== STATE.monthToken) return;
     STATE.monthDays = data.days || {};
     // Flagged here, not in renderCalendar — the i18n listener re-renders on every
     // language toggle, so setting it there marked the tab loaded before any fetch
@@ -411,233 +548,337 @@ async function loadCalendarMonth() {
     els.adminCalendar.dataset.loaded = '1';
     renderCalendar();
   } catch (err) {
-    els.adminCalendar.innerHTML = '';
-    els.adminCalendar.appendChild(errBanner(messageForError(err)));
+    if (token !== STATE.monthToken) return;
+    // Keep the month nav so a failed month is not a dead end.
+    const retry = UI.button({
+      kind: 'secondary', icon: 'rotate-right', label: I18N.t('common_retry'),
+      onClick: () => loadCalendarMonth(),
+    });
+    adminCal.renderMessage(STATE.month, UI.el('div', { class: 'stack' }, [
+      UI.banner(messageForError(err), 'error'),
+      UI.el('div', { class: 'form-row' }, [retry]),
+    ]));
+  } finally {
+    if (token === STATE.monthToken) els.adminCalendar.removeAttribute('aria-busy');
   }
 }
 
 // ── Day panel ──────────────────────────────────────────────
 
 async function openDayPanel(dateStr) {
-  const body = document.createElement('div');
-  body.className = 'stack';
-  body.innerHTML = `<div class="loading-row"><span class="spinner"></span>${I18N.t('common_loading')}</div>`;
-  showModal(I18N.t('day_panel_title', { date: fmtWeekdayDate(dateStr) }), body);
+  adminCal.setSelected(dateStr);
+  const body = UI.el('div', { class: 'stack' }, [UI.loadingRow()]);
+  const handle = showModal(I18N.t('day_panel_title', { date: fmtWeekdayDate(dateStr) }), body, {
+    onClose: () => adminCal.setSelected(null),
+  });
+  // Held so a nested modal (book / edit / move) can refresh this panel after
+  // it closes. Safe now that showModal stacks instead of wiping #modal-root:
+  // the panel node stays in the document while the child is on top, where it
+  // used to be detached and every later refresh painted into an orphan.
+  STATE.dayPanel = { body, dateStr, handle };
   await refreshDayPanel(body, dateStr);
 }
 
 async function refreshDayPanel(body, dateStr) {
   try {
-    const data = await Api.adminSlotsDay(dateStr);
+    const data = await Api.adminSlotsDay(dateStr, STATE.calendarLocationFilter);
     renderDayPanel(body, dateStr, data.slots || []);
   } catch (err) {
-    body.innerHTML = '';
-    body.appendChild(errBanner(messageForError(err)));
+    body.replaceChildren(UI.banner(messageForError(err), 'error'));
   }
+}
+
+// Refreshes the day panel and the month behind it after any slot/booking
+// change, from wherever that change was made.
+async function refreshAfterDayAction() {
+  const panel = STATE.dayPanel;
+  if (panel) await refreshDayPanel(panel.body, panel.dateStr);
+  loadCalendarMonth(true);
 }
 
 function renderDayPanel(body, dateStr, slots) {
-  body.innerHTML = '';
-
-  const list = document.createElement('div');
-  list.className = 'list';
+  const list = UI.el('div', { class: 'list' });
   if (slots.length === 0) {
-    const empty = document.createElement('div');
-    empty.className = 'empty-state';
-    empty.textContent = I18N.t('day_panel_empty');
-    list.appendChild(empty);
+    list.appendChild(UI.emptyState({ icon: 'calendar-xmark', text: I18N.t('day_panel_empty') }));
   }
-  slots.forEach((slot) => list.appendChild(renderSlotRow(body, dateStr, slot, slots)));
-  body.appendChild(list);
+  slots.forEach((slot) => list.appendChild(renderSlotRow(dateStr, slot, slots)));
 
-  const addForm = document.createElement('form');
-  addForm.className = 'row';
-  addForm.style.flexWrap = 'wrap';
-  addForm.style.marginTop = 'var(--space-2)';
-  addForm.innerHTML = `
-    <div class="field">
-      <label>${I18N.t('day_panel_add_slot_time')}</label>
-      <input class="input" type="time" step="1800" id="add-slot-time" value="09:00" required>
-    </div>
-    <div class="checkbox-row" style="align-self: flex-end; height: 40px;">
-      <input type="checkbox" id="add-slot-blocked">
-      <label for="add-slot-blocked">${I18N.t('day_panel_add_slot_blocked')}</label>
-    </div>
-    <button type="submit" class="btn btn-secondary" style="align-self: flex-end;">${I18N.t('day_panel_add_slot')}</button>
-  `;
-  addForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const minutes = timeInputToMinutes(addForm.querySelector('#add-slot-time').value);
-    const blocked = addForm.querySelector('#add-slot-blocked').checked;
-    const startUnix = unixFromBangkokDateTime(dateStr, minutes);
-    try {
-      await Api.addOverrideSlot(startUnix, blocked);
-      await refreshDayPanel(body, dateStr);
-      loadCalendarMonth();
-    } catch (err) {
-      body.appendChild(errBanner(messageForError(err)));
-    }
-  });
-  body.appendChild(addForm);
+  // The add-slot form is secondary to reviewing the day, so it sits behind a
+  // disclosure instead of competing with the slot list for attention.
+  const addForm = buildAddSlotForm(dateStr);
+  const details = UI.el('details', { class: 'section' }, [
+    UI.el('summary', { class: 'section__title' }, [
+      UI.icon('plus'), UI.el('span', { text: ` ${I18N.t('day_panel_add_slot')}` }),
+    ]),
+    addForm,
+  ]);
+
+  body.replaceChildren(list, details);
 }
 
-function renderSlotRow(panelBody, dateStr, slot, allSlots) {
-  const row = document.createElement('div');
-  row.className = 'list-row list-row--static';
-  const left = document.createElement('div');
-  left.className = 'tabular-nums';
+function buildAddSlotForm(dateStr) {
+  const timeInput = UI.el('input', {
+    class: 'input',
+    attrs: { type: 'time', step: '1800', id: 'add-slot-time', value: '09:00', required: true },
+  });
+  const locationSelect = UI.el('select', { class: 'input', attrs: { id: 'add-slot-location' } });
+  populateLocationSelect(locationSelect);
+  const blockedInput = UI.el('input', { attrs: { type: 'checkbox', id: 'add-slot-blocked' } });
+  const submit = UI.el('button', {
+    class: 'btn btn-secondary',
+    attrs: { type: 'submit', disabled: STATE.locations.length === 0 || null },
+  }, [UI.icon('plus'), UI.el('span', { text: I18N.t('day_panel_add_slot') })]);
+
+  const errorBox = UI.el('div');
+
+  const form = UI.el('form', { class: 'form-row' }, [
+    UI.el('div', { class: 'field' }, [
+      UI.el('label', { text: I18N.t('day_panel_add_slot_time'), attrs: { for: 'add-slot-time' } }),
+      timeInput,
+    ]),
+    UI.el('div', { class: 'field field--grow' }, [
+      UI.el('label', { text: I18N.t('day_panel_add_slot_location'), attrs: { for: 'add-slot-location' } }),
+      locationSelect,
+    ]),
+    UI.el('div', { class: 'checkbox-row' }, [
+      blockedInput,
+      UI.el('label', { text: I18N.t('day_panel_add_slot_blocked'), attrs: { for: 'add-slot-blocked' } }),
+    ]),
+    submit,
+  ]);
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    UI.clearBanner(errorBox);
+    const minutes = timeInputToMinutes(timeInput.value);
+    const location_id = Number(locationSelect.value);
+    const startUnix = unixFromBangkokDateTime(dateStr, minutes);
+    await UI.withBusy(submit, async () => {
+      try {
+        await Api.addOverrideSlot(startUnix, blockedInput.checked, location_id);
+        UI.toast('success', I18N.t('day_panel_slot_added'));
+        await refreshAfterDayAction();
+      } catch (err) {
+        showError(errorBox, err);
+      }
+    });
+  });
+
+  return UI.el('div', { class: 'stack-tight' }, [errorBox, form]);
+}
+
+function renderSlotRow(dateStr, slot, allSlots) {
   const timeLabel = fmtTime(slot.start_unix);
 
-  if (slot.booking) {
-    left.innerHTML = `<div>${timeLabel} — <strong>${slot.booking.booker_name}</strong></div><div class="text-caption muted">${slot.booking.booker_phone}</div>`;
-  } else {
-    left.innerHTML = `<div>${timeLabel} <span class="status-chip ${slot.blocked ? 'status-chip--cancelled' : 'status-chip--free'}" style="margin-left:8px;">${I18N.t(slot.blocked ? 'day_panel_slot_blocked' : 'day_panel_slot_free')}</span></div>`;
-  }
-
-  const actions = document.createElement('div');
-  actions.className = 'row-wrap';
+  let mainNode, metaNode, actions;
 
   if (slot.booking) {
-    actions.appendChild(smallBtn('btn-secondary', I18N.t('day_panel_booking_edit'), () => openEditBookingModal(panelBody, dateStr, slot)));
-    actions.appendChild(smallBtn('btn-secondary', I18N.t('day_panel_booking_move'), () => openMoveModal(panelBody, dateStr, slot, allSlots)));
-    actions.appendChild(smallBtn('btn-destructive', I18N.t('day_panel_booking_cancel'), async () => {
-      if (!confirm(I18N.t('day_panel_booking_cancel_confirm', { name: slot.booking.booker_name }))) return;
-      try {
-        await Api.adminCancelBooking(slot.booking.id);
-        await refreshDayPanel(panelBody, dateStr);
-        loadCalendarMonth();
-      } catch {
-        alert(I18N.t('common_error_generic'));
-      }
-    }));
+    mainNode = UI.el('div', { class: 'row' }, [
+      UI.el('span', { class: 'tabular-nums', text: timeLabel }),
+      UI.el('strong', { text: slot.booking.booker_name }),
+    ]);
+    metaNode = UI.el('div', { class: 'list-row__meta' }, [
+      UI.icon('phone'),
+      UI.el('span', { class: 'tabular-nums', text: ` ${slot.booking.booker_phone}` }),
+      slot.location_title ? UI.el('span', { text: ` · ${slot.location_title}` }) : null,
+    ]);
+    actions = [
+      slotActionBtn('tertiary', 'pen', I18N.t('day_panel_booking_edit'),
+        () => openEditBookingModal(dateStr, slot)),
+      slotActionBtn('tertiary', 'right-left', I18N.t('day_panel_booking_move'),
+        () => openMoveModal(dateStr, slot, allSlots)),
+      slotActionBtn('destructive', 'xmark', I18N.t('day_panel_booking_cancel'), async (btn) => {
+        const ok = await UI.confirm({
+          title: I18N.t('day_panel_booking_cancel'),
+          message: I18N.t('day_panel_booking_cancel_confirm', { name: slot.booking.booker_name }),
+          confirmLabel: I18N.t('day_panel_booking_cancel'),
+        });
+        if (!ok) return;
+        await UI.withBusy(btn, async () => {
+          try {
+            await Api.adminCancelBooking(slot.booking.id);
+            UI.toast('success', I18N.t('day_panel_booking_cancelled'));
+            await refreshAfterDayAction();
+          } catch (err) { UI.toastError(err); }
+        });
+      }),
+    ];
   } else {
-    actions.appendChild(smallBtn('btn-primary', I18N.t('day_panel_slot_book'), () => openNewBookingModal(panelBody, dateStr, slot)));
-    actions.appendChild(smallBtn('btn-ghost', I18N.t(slot.blocked ? 'day_panel_slot_unblock' : 'day_panel_slot_block'), async () => {
-      try {
-        await Api.updateSlot(slot.id, !slot.blocked);
-        await refreshDayPanel(panelBody, dateStr);
-        loadCalendarMonth();
-      } catch {
-        alert(I18N.t('common_error_generic'));
-      }
-    }));
-    actions.appendChild(smallBtn('btn-ghost', I18N.t('day_panel_slot_delete'), async () => {
-      if (!confirm(I18N.t('day_panel_slot_delete_confirm'))) return;
-      try {
-        await Api.deleteSlot(slot.id);
-        await refreshDayPanel(panelBody, dateStr);
-        loadCalendarMonth();
-      } catch {
-        alert(I18N.t('common_error_generic'));
-      }
-    }));
+    mainNode = UI.el('div', { class: 'row' }, [
+      UI.el('span', { class: 'tabular-nums', text: timeLabel }),
+      UI.el('span', {
+        class: `status-chip ${slot.blocked ? 'status-chip--cancelled' : 'status-chip--free'}`,
+        text: I18N.t(slot.blocked ? 'day_panel_slot_blocked' : 'day_panel_slot_free'),
+      }),
+    ]);
+    metaNode = slot.location_title
+      ? UI.el('div', { class: 'list-row__meta' }, [
+          UI.icon('location-dot'), UI.el('span', { text: ` ${slot.location_title}` }),
+        ])
+      : null;
+    actions = [
+      slotActionBtn('primary', 'user-plus', I18N.t('day_panel_slot_book'),
+        () => openNewBookingModal(dateStr, slot), true),
+      slotActionBtn('tertiary', slot.blocked ? 'lock-open' : 'ban',
+        I18N.t(slot.blocked ? 'day_panel_slot_unblock' : 'day_panel_slot_block'), async (btn) => {
+          await UI.withBusy(btn, async () => {
+            try {
+              await Api.updateSlot(slot.id, !slot.blocked);
+              await refreshAfterDayAction();
+            } catch (err) { UI.toastError(err); }
+          });
+        }),
+      slotActionBtn('tertiary', 'trash', I18N.t('day_panel_slot_delete'), async (btn) => {
+        const ok = await UI.confirm({
+          title: I18N.t('day_panel_slot_delete'),
+          message: I18N.t('day_panel_slot_delete_confirm'),
+          confirmLabel: I18N.t('common_delete'),
+        });
+        if (!ok) return;
+        await UI.withBusy(btn, async () => {
+          try {
+            await Api.deleteSlot(slot.id);
+            await refreshAfterDayAction();
+          } catch (err) { UI.toastError(err); }
+        });
+      }),
+    ];
   }
 
-  row.append(left, actions);
-  return row;
+  return UI.listRow({ mainNode, metaNode, actions });
 }
 
-function smallBtn(cls, label, onClick) {
-  const btn = document.createElement('button');
-  btn.type = 'button';
-  btn.className = `btn ${cls} btn-sm`;
-  btn.textContent = label;
-  btn.addEventListener('click', onClick);
+// Three full-width text buttons per slot was what pushed this panel wide
+// enough to overflow a phone. The primary action keeps its label so it stays
+// obvious; the secondary two are icon-only, labelled for assistive tech and
+// on hover via title.
+function slotActionBtn(kind, icon, label, onClick, showLabel) {
+  const btn = UI.button({
+    kind, size: 'sm', icon, label,
+    iconOnly: !showLabel,
+    ariaLabel: label,
+  });
+  btn.addEventListener('click', () => onClick(btn));
   return btn;
 }
 
-function openNewBookingModal(panelBody, dateStr, slot) {
-  const body = bookingFormBody();
-  showModal(I18N.t('booking_form_title_new'), body);
-  body.querySelector('form').addEventListener('submit', async (e) => {
+// ── Booking form (admin-side) ──────────────────────────────
+
+function openBookingModal({ title, name = '', phone = '', submitLabel, onSubmit }) {
+  const nameInput = UI.el('input', {
+    class: 'input',
+    attrs: { id: 'bk-name', type: 'text', required: true, autocomplete: 'name' },
+  });
+  nameInput.value = name;
+  const phoneInput = UI.el('input', {
+    class: 'input',
+    attrs: { id: 'bk-phone', type: 'tel', inputmode: 'tel', required: true, autocomplete: 'tel' },
+  });
+  phoneInput.value = phone;
+
+  const errorBox = UI.el('div');
+  const submit = UI.el('button', {
+    class: 'btn btn-primary btn-block',
+    attrs: { type: 'submit' },
+  }, [UI.icon('check'), UI.el('span', { text: submitLabel || I18N.t('common_save') })]);
+
+  const form = UI.el('form', { class: 'stack-tight' }, [
+    UI.el('div', { class: 'field' }, [
+      UI.el('label', { text: I18N.t('booker_form_name'), attrs: { for: 'bk-name' } }),
+      nameInput,
+    ]),
+    UI.el('div', { class: 'field' }, [
+      UI.el('label', { text: I18N.t('booker_form_phone'), attrs: { for: 'bk-phone' } }),
+      phoneInput,
+    ]),
+    submit,
+  ]);
+
+  const body = UI.el('div', { class: 'stack-tight' }, [errorBox, form]);
+  showModal(title, body);
+
+  form.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const name = body.querySelector('#bk-name').value.trim();
-    const phone = body.querySelector('#bk-phone').value.trim();
-    if (!name || !phone) return;
-    try {
-      await Api.adminCreateBooking(slot.id, name, phone);
-      closeModal();
-      await refreshDayPanel(panelBody, dateStr);
-      loadCalendarMonth();
-    } catch (err) {
-      body.querySelector('#bk-error').appendChild(errBanner(err.status === 409 ? I18N.t('booking_conflict') : messageForError(err)));
-    }
+    UI.clearBanner(errorBox);
+    const nameValue = nameInput.value.trim();
+    const phoneValue = phoneInput.value.trim();
+    if (!nameValue) { nameInput.focus(); return; }
+    if (!phoneValue) { phoneInput.focus(); return; }
+    await UI.withBusy(submit, async () => {
+      try {
+        await onSubmit(nameValue, phoneValue);
+        closeModal();
+        await refreshAfterDayAction();
+      } catch (err) {
+        showError(errorBox, err.status === 409 ? I18N.t('booking_conflict') : messageForError(err));
+      }
+    });
   });
 }
 
-function openEditBookingModal(panelBody, dateStr, slot) {
-  const body = bookingFormBody(slot.booking.booker_name, slot.booking.booker_phone);
-  showModal(I18N.t('booking_form_title_edit'), body);
-  body.querySelector('form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const name = body.querySelector('#bk-name').value.trim();
-    const phone = body.querySelector('#bk-phone').value.trim();
-    try {
-      await Api.adminEditBooking(slot.booking.id, { name, phone });
-      closeModal();
-      await refreshDayPanel(panelBody, dateStr);
-    } catch (err) {
-      body.querySelector('#bk-error').appendChild(errBanner(messageForError(err)));
-    }
+function openNewBookingModal(dateStr, slot) {
+  openBookingModal({
+    title: I18N.t('booking_form_title_new'),
+    submitLabel: I18N.t('day_panel_slot_book'),
+    onSubmit: (name, phone) => Api.adminCreateBooking(slot.id, name, phone),
   });
 }
 
-function bookingFormBody(name = '', phone = '') {
-  const body = document.createElement('div');
-  body.innerHTML = `
-    <div id="bk-error"></div>
-    <form class="stack">
-      <div class="field">
-        <label>${I18N.t('booker_form_name')}</label>
-        <input class="input" id="bk-name" type="text" value="${name.replace(/"/g, '&quot;')}" required>
-      </div>
-      <div class="field">
-        <label>${I18N.t('booker_form_phone')}</label>
-        <input class="input" id="bk-phone" type="tel" value="${phone.replace(/"/g, '&quot;')}" required>
-      </div>
-      <button type="submit" class="btn btn-primary">${I18N.t('common_save')}</button>
-    </form>
-  `;
-  return body;
+function openEditBookingModal(dateStr, slot) {
+  openBookingModal({
+    title: I18N.t('booking_form_title_edit'),
+    name: slot.booking.booker_name,
+    phone: slot.booking.booker_phone,
+    onSubmit: (name, phone) => Api.adminEditBooking(slot.booking.id, { name, phone }),
+  });
 }
 
-function openMoveModal(panelBody, dateStr, slot, allSlots) {
+function openMoveModal(dateStr, slot, allSlots) {
   const candidates = allSlots.filter((s) => s.id !== slot.id && !s.booking);
-  const body = document.createElement('div');
+
   if (candidates.length === 0) {
-    body.innerHTML = `<div class="empty-state">${I18N.t('move_modal_none')}</div>`;
-  } else {
-    body.className = 'row-wrap';
-    candidates.forEach((c) => {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'chip tabular-nums';
-      btn.textContent = fmtTime(c.start_unix);
-      btn.addEventListener('click', async () => {
+    showModal(I18N.t('move_modal_title'),
+      UI.emptyState({ icon: 'right-left', text: I18N.t('move_modal_none') }));
+    return;
+  }
+
+  const grid = UI.el('div', { class: 'row-wrap' });
+  candidates.forEach((c) => {
+    const btn = UI.el('button', { class: 'chip tabular-nums', attrs: { type: 'button' } }, [
+      UI.icon('clock'),
+      UI.el('span', { text: fmtTime(c.start_unix) }),
+    ]);
+    btn.addEventListener('click', async () => {
+      await UI.withBusy(btn, async () => {
         try {
           await Api.adminMoveBooking(slot.booking.id, c.id);
           closeModal();
-          await refreshDayPanel(panelBody, dateStr);
-          loadCalendarMonth();
+          UI.toast('success', I18N.t('move_modal_moved'));
+          await refreshAfterDayAction();
         } catch (err) {
-          alert(err.status === 409 ? I18N.t('move_modal_conflict') : I18N.t('common_error_generic'));
+          UI.toastError(err.status === 409 ? I18N.t('move_modal_conflict') : err);
         }
       });
-      body.appendChild(btn);
     });
-  }
-  showModal(I18N.t('move_modal_title'), body);
+    grid.appendChild(btn);
+  });
+
+  showModal(I18N.t('move_modal_title'), UI.el('div', { class: 'stack-tight' }, [
+    UI.el('p', { class: 'text-helper', text: I18N.t('move_modal_hint') }),
+    grid,
+  ]));
 }
 
 // ── Notifications ────────────────────────────────────────────
 
 function updateBadge() {
-  els.notifBadge.innerHTML = '';
+  els.notifBadge.replaceChildren();
   if (STATE.unreadCount > 0) {
-    const span = document.createElement('span');
-    span.className = 'tab-badge';
-    span.textContent = String(STATE.unreadCount);
-    els.notifBadge.appendChild(span);
+    els.notifBadge.append(
+      UI.el('span', { class: 'tab-badge', text: String(STATE.unreadCount), attrs: { 'aria-hidden': 'true' } }),
+      // "3" alone tells a screen reader nothing about what it counts.
+      UI.el('span', { class: 'sr-only', text: I18N.t('notif_unread_count', { n: STATE.unreadCount }) })
+    );
   }
 }
 
@@ -675,7 +916,7 @@ function ensureInterval() {
 }
 
 async function loadNotifications() {
-  els.notificationsList.innerHTML = `<div class="loading-row"><span class="spinner"></span>${I18N.t('common_loading')}</div>`;
+  UI.setLoading(els.notificationsList);
   try {
     const data = await Api.notificationsList();
     STATE.sessionUnreadIds = new Set(data.notifications.filter((n) => n.unread).map((n) => n.id));
@@ -687,56 +928,73 @@ async function loadNotifications() {
     STATE.unreadCount = 0;
     updateBadge();
   } catch (err) {
-    els.notificationsList.innerHTML = '';
-    els.notificationsList.appendChild(errBanner(messageForError(err)));
+    showError(els.notificationsList, err);
+  } finally {
+    UI.doneLoading(els.notificationsList);
   }
 }
 
 function renderNotifications(notifications) {
-  els.notificationsList.innerHTML = '';
   if (notifications.length === 0) {
-    const empty = document.createElement('div');
-    empty.className = 'empty-state';
-    empty.textContent = I18N.t('notif_empty');
-    els.notificationsList.appendChild(empty);
+    els.notificationsList.replaceChildren(UI.emptyState({
+      icon: 'bell-slash',
+      text: I18N.t('notif_empty'),
+    }));
     return;
   }
-  notifications.forEach((n) => {
-    const row = document.createElement('div');
-    row.className = 'list-row list-row--static';
-    const left = document.createElement('div');
-    left.className = 'row';
-    if (STATE.sessionUnreadIds.has(n.id)) {
-      const dot = document.createElement('span');
-      dot.className = 'dot';
-      left.appendChild(dot);
-    }
+
+  els.notificationsList.replaceChildren(...notifications.map((n) => {
+    const unread = STATE.sessionUnreadIds.has(n.id);
     const textKey = n.type === 'cancelled' ? 'notif_new_cancel' : 'notif_new_booking';
-    const text = document.createElement('span');
-    text.innerHTML = `${I18N.t(textKey, { name: n.booker_name, time: fmtDateTime(n.slot_unix) })} <span class="text-caption muted tabular-nums">(${fmtDateTime(n.created_at)})</span>`;
-    left.appendChild(text);
-    const goBtn = document.createElement('button');
-    goBtn.type = 'button';
-    goBtn.className = 'btn btn-ghost btn-sm';
-    goBtn.textContent = I18N.t('notif_go_to_day');
-    goBtn.addEventListener('click', () => {
-      setTab('calendar');
-      STATE.month = n.day.slice(0, 7);
-      loadCalendarMonth().then(() => openDayPanel(n.day));
+
+    const main = UI.el('div', { class: 'row' }, [
+      unread ? UI.el('span', { class: 'dot', attrs: { 'aria-hidden': 'true' } }) : null,
+      UI.el('span', {
+        text: I18N.t(textKey, { name: n.booker_name, time: fmtDateTime(n.slot_unix) }),
+      }),
+    ]);
+
+    const goBtn = UI.button({
+      kind: 'tertiary', size: 'sm', icon: 'arrow-right',
+      label: I18N.t('notif_go_to_day'),
+      onClick: () => {
+        setTab('calendar');
+        STATE.month = n.day.slice(0, 7);
+        loadCalendarMonth().then(() => openDayPanel(n.day));
+      },
     });
-    row.append(left, goBtn);
-    els.notificationsList.appendChild(row);
-  });
+
+    return UI.listRow({
+      mainNode: main,
+      meta: fmtDateTime(n.created_at),
+      actions: [goBtn],
+    });
+  }));
 }
 
 // ── Log ──────────────────────────────────────────────────────
 
+function fillSelect(selectEl, options) {
+  // Re-labelling on a language switch used to wipe innerHTML and silently
+  // reset the filter to "all" while STATE.logFilters still held the old
+  // value, so the visible UI and the query disagreed.
+  const previous = selectEl.value;
+  selectEl.replaceChildren(...options.map(([value, label]) =>
+    UI.el('option', { text: label, attrs: { value } })
+  ));
+  if (options.some(([value]) => value === previous)) selectEl.value = previous;
+}
+
 function populateLogFilterSelects() {
-  els.logType.innerHTML = `<option value="">${I18N.t('log_type_all')}</option>` +
-    ['booked', 'moved', 'cancelled', 'edited'].map((t) => `<option value="${t}">${I18N.t('log_type_' + t)}</option>`).join('');
-  els.logActor.innerHTML = `<option value="">${I18N.t('log_actor_all')}</option>` +
-    ['booker', 'admin'].map((a) => `<option value="${a}">${I18N.t('log_actor_' + a)}</option>`).join('');
-  els.logOrderToggle.textContent = I18N.t(STATE.logOrderDesc ? 'log_order_toggle_newest' : 'log_order_toggle_oldest');
+  fillSelect(els.logType, [
+    ['', I18N.t('log_type_all')],
+    ...['booked', 'moved', 'cancelled', 'edited'].map((t) => [t, I18N.t('log_type_' + t)]),
+  ]);
+  fillSelect(els.logActor, [
+    ['', I18N.t('log_actor_all')],
+    ...['booker', 'admin'].map((a) => [a, I18N.t('log_actor_' + a)]),
+  ]);
+  els.logOrderLabel.textContent = I18N.t(STATE.logOrderDesc ? 'log_order_toggle_newest' : 'log_order_toggle_oldest');
 }
 
 els.logFiltersForm.addEventListener('change', () => {
@@ -750,7 +1008,9 @@ els.logFiltersForm.addEventListener('change', () => {
 
 els.logOrderToggle.addEventListener('click', () => {
   STATE.logOrderDesc = !STATE.logOrderDesc;
-  els.logOrderToggle.textContent = I18N.t(STATE.logOrderDesc ? 'log_order_toggle_newest' : 'log_order_toggle_oldest');
+  els.logOrderLabel.textContent = I18N.t(STATE.logOrderDesc ? 'log_order_toggle_newest' : 'log_order_toggle_oldest');
+  els.logOrderToggle.querySelector('.icon')?.classList.toggle('fa-arrow-up-wide-short', !STATE.logOrderDesc);
+  els.logOrderToggle.querySelector('.icon')?.classList.toggle('fa-arrow-down-wide-short', STATE.logOrderDesc);
   renderLog();
 });
 
@@ -760,16 +1020,21 @@ async function loadLog(reset) {
   if (reset) {
     STATE.logEvents = [];
     STATE.logCursor = null;
+    UI.setLoading(els.logList);
   }
+  const btn = reset ? null : els.logLoadMore;
   try {
+    if (btn) UI.busy(btn, true);
     const data = await Api.log({ ...STATE.logFilters, cursor: STATE.logCursor || undefined });
     STATE.logEvents = STATE.logEvents.concat(data.events || []);
     STATE.logCursor = data.next_cursor;
     els.logLoadMore.classList.toggle('hidden', !STATE.logCursor);
     renderLog();
   } catch (err) {
-    els.logList.innerHTML = '';
-    els.logList.appendChild(errBanner(messageForError(err)));
+    showError(els.logList, err);
+  } finally {
+    if (btn) UI.busy(btn, false);
+    UI.doneLoading(els.logList);
   }
 }
 
@@ -781,45 +1046,38 @@ const LOG_CHIP_CLASS = {
 };
 
 function renderLog() {
-  els.logList.innerHTML = '';
   if (STATE.logEvents.length === 0) {
-    const empty = document.createElement('div');
-    empty.className = 'empty-state';
-    empty.textContent = I18N.t('log_empty');
-    els.logList.appendChild(empty);
+    els.logList.replaceChildren(UI.emptyState({
+      icon: 'clock-rotate-left',
+      text: I18N.t('log_empty'),
+    }));
     return;
   }
+
   const ordered = STATE.logOrderDesc ? STATE.logEvents : [...STATE.logEvents].reverse();
-  ordered.forEach((ev) => {
-    const row = document.createElement('div');
-    row.className = 'list-row list-row--static';
-    row.style.flexDirection = 'column';
-    row.style.alignItems = 'flex-start';
-    row.style.gap = '4px';
 
-    const line1 = document.createElement('div');
-    line1.className = 'row';
-    const time = document.createElement('span');
-    time.className = 'text-caption tabular-nums';
-    time.textContent = fmtDateTime(ev.created_at);
-    const chip = document.createElement('span');
-    chip.className = `status-chip ${LOG_CHIP_CLASS[ev.type]}`;
-    chip.textContent = I18N.t('log_type_' + ev.type);
-    const actor = document.createElement('span');
-    actor.className = 'text-caption muted';
-    actor.textContent = I18N.t('log_actor_' + ev.actor);
-    line1.append(time, chip, actor);
+  els.logList.replaceChildren(...ordered.map((ev) => {
+    const meta = UI.el('div', { class: 'row-wrap' }, [
+      UI.el('span', {
+        class: `status-chip ${LOG_CHIP_CLASS[ev.type]}`,
+        text: I18N.t('log_type_' + ev.type),
+      }),
+      UI.el('span', { class: 'text-caption tabular-nums', text: fmtDateTime(ev.created_at) }),
+      UI.el('span', { class: 'text-caption muted', text: I18N.t('log_actor_' + ev.actor) }),
+    ]);
 
-    const line2 = document.createElement('div');
-    line2.className = 'text-body';
     const lessonTime = ev.type === 'moved'
       ? I18N.t('log_move_arrow', { before: fmtDateTime(ev.prev_slot_unix), after: fmtDateTime(ev.slot_unix) })
       : fmtDateTime(ev.slot_unix);
-    line2.innerHTML = `<strong>${ev.booker_name}</strong> · <span class="tabular-nums">${lessonTime}</span>`;
 
-    row.append(line1, line2);
-    els.logList.appendChild(row);
-  });
+    const main = UI.el('div', { class: 'text-body' }, [
+      UI.el('strong', { text: ev.booker_name }),
+      UI.el('span', { class: 'tabular-nums', text: ` · ${lessonTime}` }),
+    ]);
+
+    // Stacked by class rather than by three inline styles set from JS.
+    return UI.listRow({ mainNode: main, metaNode: meta, stacked: true });
+  }));
 }
 
 // ── Settings ─────────────────────────────────────────────────
@@ -827,63 +1085,114 @@ function renderLog() {
 function renderSettings() {
   els.settingsDisplayName.textContent = STATE.admin.display_name;
   els.shareLink.value = `${window.location.origin}/b/${STATE.admin.slug}`;
+  els.shareCopyLabel.textContent = I18N.t('settings_share_copy');
 }
 
 els.shareCopyBtn.addEventListener('click', async () => {
   try {
     await navigator.clipboard.writeText(els.shareLink.value);
-    const original = els.shareCopyBtn.textContent;
-    els.shareCopyBtn.textContent = I18N.t('common_copied');
-    setTimeout(() => { els.shareCopyBtn.textContent = original; }, 1500);
+    UI.toast('success', I18N.t('common_copied'));
   } catch {
+    // Clipboard access needs a secure context; selecting lets the teacher
+    // copy manually instead of failing silently.
     els.shareLink.select();
+    UI.toast('info', I18N.t('settings_share_copy_manual'));
   }
 });
+
+// Both slug changes break every link the teacher has already given out, so
+// both go through the same explicit confirmation.
+async function confirmSlugChange() {
+  return UI.confirm({
+    title: I18N.t('settings_slug_confirm_title'),
+    message: I18N.t('settings_slug_confirm_body'),
+    confirmLabel: I18N.t('common_confirm'),
+    icon: 'link',
+  });
+}
 
 els.slugForm.addEventListener('submit', async (e) => {
   e.preventDefault();
-  els.slugError.classList.add('hidden');
+  setFieldMessage(els.slugError, '');
   const slug = els.slugInput.value.trim();
   if (!/^[a-z0-9-]{3,32}$/.test(slug)) {
-    els.slugError.textContent = I18N.t('settings_slug_invalid');
-    els.slugError.classList.remove('hidden');
+    els.slugInput.setAttribute('aria-invalid', 'true');
+    setFieldMessage(els.slugError, I18N.t('settings_slug_invalid'));
+    els.slugInput.focus();
     return;
   }
-  if (!confirm(`${I18N.t('settings_slug_confirm_title')}\n\n${I18N.t('settings_slug_confirm_body')}`)) return;
-  try {
-    const result = await Api.setSlug(slug);
-    STATE.admin.slug = result.slug;
-    els.slugInput.value = '';
-    renderSettings();
-  } catch (err) {
-    els.slugError.textContent = err.status === 409 ? I18N.t('settings_slug_taken') : I18N.t('settings_slug_invalid');
-    els.slugError.classList.remove('hidden');
-  }
+  els.slugInput.setAttribute('aria-invalid', 'false');
+  if (!await confirmSlugChange()) return;
+  await UI.withBusy(els.slugSubmit, async () => {
+    try {
+      const result = await Api.setSlug(slug);
+      STATE.admin.slug = result.slug;
+      els.slugInput.value = '';
+      renderSettings();
+      UI.toast('success', I18N.t('settings_slug_saved'));
+    } catch (err) {
+      els.slugInput.setAttribute('aria-invalid', 'true');
+      setFieldMessage(els.slugError,
+        err.status === 409 ? I18N.t('settings_slug_taken') : I18N.t('settings_slug_invalid'));
+    }
+  });
 });
 
 els.slugRegenerateBtn.addEventListener('click', async () => {
-  if (!confirm(`${I18N.t('settings_slug_confirm_title')}\n\n${I18N.t('settings_slug_confirm_body')}`)) return;
-  try {
-    const result = await Api.regenerateSlug();
-    STATE.admin.slug = result.slug;
-    renderSettings();
-  } catch {
-    alert(I18N.t('common_error_generic'));
-  }
+  if (!await confirmSlugChange()) return;
+  await UI.withBusy(els.slugRegenerateBtn, async () => {
+    try {
+      const result = await Api.regenerateSlug();
+      STATE.admin.slug = result.slug;
+      renderSettings();
+      UI.toast('success', I18N.t('settings_slug_saved'));
+    } catch (err) {
+      UI.toastError(err);
+    }
+  });
+});
+
+// Full settings reset: template, locations, and booking link go back
+// to the fresh-admin state. Bookings survive — their slots are
+// re-pointed at the default location, which the confirm says.
+els.settingsResetBtn.addEventListener('click', async () => {
+  if (!await UI.confirm({
+    title: I18N.t('settings_reset_confirm_title'),
+    message: I18N.t('settings_reset_confirm_body'),
+    confirmLabel: I18N.t('settings_reset_btn'),
+    icon: 'triangle-exclamation',
+  })) return;
+  await UI.withBusy(els.settingsResetBtn, async () => {
+    try {
+      const result = await Api.resetSettings();
+      STATE.admin.slug = result.slug;
+      STATE.calendarLocationFilter = null;
+      renderSettings();
+      await Promise.all([loadSchedule(), loadLocations()]);
+      loadCalendarMonth();
+      UI.toast('success', I18N.t('settings_reset_done'));
+    } catch (err) {
+      UI.toastError(err);
+    }
+  });
 });
 
 // ── Init ─────────────────────────────────────────────────────
 
 async function init() {
   I18N.apply();
+  els.adminLocationFilter.setAttribute('aria-label', I18N.t('calendar_filter_all_locations'));
   try {
     await afterLogin();
   } catch (err) {
-    if (err.status === 401) {
-      showLogin();
-    } else {
-      showLogin();
-      els.loginError.textContent = I18N.t('common_error_network');
+    showLogin();
+    // A 401 just means "not signed in yet" and needs no error message; only
+    // a real failure does.
+    if (err.status !== 401) {
+      els.loginError.replaceChildren(
+        UI.icon('circle-exclamation'),
+        UI.el('span', { text: I18N.t('common_error_network') })
+      );
       els.loginError.classList.remove('hidden');
     }
   }

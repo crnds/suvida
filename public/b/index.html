@@ -2,52 +2,80 @@
 <html lang="th">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- viewport-fit=cover pairs with the env(safe-area-inset-*) padding in
+     theme.css so the sticky header clears the iPhone notch and the bottom
+     sheet clears the home indicator. -->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#fbf9f6">
 <title>Suvida Piano Studio</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+Thai:wght@400;500;600&family=Noto+Sans+Thai:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<!-- Only the weights theme.css actually uses. -->
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+Thai:wght@400;500&family=Noto+Sans+Thai:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/fontawesome.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/solid.min.css">
 <link rel="stylesheet" href="/shared/theme.css">
 </head>
 <body>
 
+<a class="skip-link" href="#main" data-i18n="a11y_skip_to_content"></a>
+
 <header class="app-header">
-  <div class="app-header__brand" id="brand-name">Suvida Piano Studio</div>
-  <div id="lang-toggle"></div>
+  <h1 class="app-header__brand" id="brand-name">Suvida Piano Studio</h1>
+  <div class="app-header__actions">
+    <div id="lang-toggle"></div>
+  </div>
 </header>
 
-<main class="page">
+<main class="page" id="main">
   <div id="not-found" class="hidden">
-    <p class="banner banner--error" data-i18n="booker_teacher_not_found"></p>
+    <p class="banner banner--error"><span class="banner__text" data-i18n="booker_teacher_not_found"></span></p>
   </div>
 
   <div id="app-body" class="hidden">
-    <div class="tabs" role="tablist">
-      <button class="tab" role="tab" id="tab-btn-book" data-i18n="booker_tab_book" aria-selected="true"></button>
-      <button class="tab" role="tab" id="tab-btn-history" data-i18n="booker_tab_history" aria-selected="false"></button>
-    </div>
+    <nav class="tabs" role="tablist" aria-label="Sections">
+      <button class="tab" role="tab" id="tab-btn-book" aria-selected="true">
+        <i class="fa-solid fa-calendar-days icon" aria-hidden="true"></i><span data-i18n="booker_tab_book"></span>
+      </button>
+      <button class="tab" role="tab" id="tab-btn-history" aria-selected="false">
+        <i class="fa-solid fa-clock-rotate-left icon" aria-hidden="true"></i><span data-i18n="booker_tab_history"></span>
+      </button>
+    </nav>
 
-    <section id="tab-book">
-      <h2 class="text-h3" data-i18n="booker_pick_day" style="margin-bottom: var(--space-2);"></h2>
+    <section id="tab-book" class="stack-tight">
+      <h2 class="text-h3" data-i18n="booker_pick_day"></h2>
+      <div id="location-filter" class="row-wrap" role="group"></div>
       <div id="calendar"></div>
     </section>
 
     <section id="tab-history" class="hidden stack">
-      <div class="card">
-        <h3 class="card-title" data-i18n="booker_history_local_title"></h3>
+      <div class="section">
+        <div class="section__head">
+          <h2 class="section__title" data-i18n="booker_history_local_title"></h2>
+        </div>
         <div id="local-bookings" class="list"></div>
       </div>
 
-      <div class="card">
-        <h3 class="card-title" data-i18n="booker_history_lookup_title"></h3>
-        <form id="lookup-form" class="row">
-          <div class="field" style="flex: 1;">
-            <input class="input" type="tel" id="lookup-phone" data-i18n-placeholder="booker_history_lookup_phone" required>
+      <div class="section">
+        <div class="section__head">
+          <h2 class="section__title" data-i18n="booker_history_lookup_title"></h2>
+        </div>
+        <p class="text-helper measure" data-i18n="booker_history_lookup_hint"></p>
+        <form id="lookup-form" class="form-row">
+          <div class="field field--grow">
+            <label for="lookup-phone" data-i18n="booker_history_lookup_phone_label"></label>
+            <input class="input" type="tel" id="lookup-phone" inputmode="tel"
+                   autocomplete="tel"
+                   data-i18n-placeholder="booker_history_lookup_phone"
+                   aria-describedby="lookup-error" required>
           </div>
-          <button class="btn btn-primary" type="submit" data-i18n="booker_history_lookup_btn"></button>
+          <button class="btn btn-primary" type="submit" id="lookup-submit">
+            <i class="fa-solid fa-magnifying-glass icon" aria-hidden="true"></i><span data-i18n="booker_history_lookup_btn"></span>
+          </button>
         </form>
-        <div id="lookup-error" class="field-error hidden"></div>
-        <div id="lookup-results" class="list" style="margin-top: var(--space-2);"></div>
+        <div id="lookup-error" class="field-error hidden" role="alert"></div>
+        <div id="lookup-results" class="list"></div>
       </div>
     </section>
   </div>
@@ -58,6 +86,7 @@
 <script src="/shared/i18n.js"></script>
 <script src="/shared/format.js"></script>
 <script src="/shared/api.js"></script>
+<script src="/shared/ui.js"></script>
 <script src="/shared/calendar.js"></script>
 <script src="/b/page.js"></script>
 </body>

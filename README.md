@@ -82,14 +82,23 @@ code path as production (`@libsql/client`'s `file:` transport), just without
 the network hop.
 
 ```bash
-npm i                                    # installs @libsql/client + vercel devDependency
+npm i                                    # @libsql/client + the dev/QA devDependencies
 export TURSO_DATABASE_URL=file:local.db
 export OWNER_USERNAME=owner
 export OWNER_PASSWORD=change-me
-node scripts/migrate.js                  # creates local.db with the schema
-node scripts/seed.js                     # bootstraps the owner account
-vercel dev                               # serves the app at http://localhost:3000
+npm run migrate                          # creates local.db with the schema
+npm run seed                             # bootstraps the owner account
+npm run dev                              # serves the app at http://localhost:3000
 ```
+
+`npm run dev` starts `scripts/devserver.js`, which serves `public/` and
+dispatches `/api/*` to the same three catch-all handlers production uses. It
+needs no Vercel account, so a fresh clone comes up immediately.
+
+Use `vercel dev` instead (it requires `vercel login`) whenever you change
+routing: `devserver.js` reimplements `vercel.json`'s rewrites, and neither it
+nor `SMOKE_SKIP_BUILD=1` enforces the three-serverless-function ceiling. Only a
+real `vercel build` does — see §4.
 
 Then:
 
@@ -138,7 +147,50 @@ true here — see `.vercel/project.json`). Skip it during quick iteration with:
 SMOKE_SKIP_BUILD=1 npm run smoke
 ```
 
-## 5. Deploying
+## 5. Browser QA (`public/`)
+
+`smoke.js` is API-only — it never touches the DOM, so a green run says nothing
+about the front-end. `scripts/uiqa.js` is the front-end's safety net: it drives
+the real journeys in headless Chrome and asserts the behaviour, then reports
+layout and accessibility problems.
+
+```bash
+# terminal 1 — server (as in §3)
+npm run dev
+
+# terminal 2
+export TURSO_DATABASE_URL=file:local.db OWNER_USERNAME=owner OWNER_PASSWORD=change-me
+npm run seed:qa      # realistic teacher, locations, schedule and bookings
+npm run qa           # flows + a11y  (exits non-zero on failure)
+npm run qa:shots     # screenshots every page at 375/768/1280 -> ./qa-shots
+npm run qa:all       # all three suites
+```
+
+- **flows** — books a lesson end to end, checks focus management and scroll
+  locking, the stacked-modal refresh, retry after a failed month load, the
+  ARIA tabs pattern, and that errors say what actually went wrong.
+- **a11y** — contrast against WCAG AA, accessible names, form labels and
+  heading order on every page, including at 320px.
+- **shots** — full-page screenshots plus horizontal-overflow, console-error
+  and tap-target reports. Sub-44px targets are reported, not failed: headless
+  Chrome renders as `pointer: fine`, so the coarse-pointer bump a real phone
+  gets is not applied.
+
+Useful flags: `--base=URL`, `--lang=th|en`, `--out=DIR`, `--only=NAME`,
+`--widths=375,768`. Chrome is found via `CHROME_PATH` or the usual install
+locations. `seed:qa` prints the credentials it created and pins the teacher's
+slug to `ployxx`, which is what the harness defaults to; override with
+`QA_SLUG`.
+
+> **A slug longer or shorter than six lowercase letters breaks the booking
+> page.** `PATCH /api/admin/slug` accepts `[a-z0-9-]{3,32}` (and the Settings
+> form's `pattern` and hint both advertise that), but `api/_routes/public/`
+> and `public/b/page.js` gate on `^[a-z]{6}$`. Set a custom slug containing a
+> digit or a hyphen and every student request 400s. `seed:qa` therefore pins a
+> six-letter slug. This is a pre-existing mismatch, not something the QA
+> harness introduced.
+
+## 6. Deploying
 
 ```bash
 vercel deploy              # preview deployment
@@ -171,7 +223,11 @@ See *plan.md*'s "Architecture" section for the full annotated tree. Short
 version: `api/_lib/` (db, auth, time, phone, rate-limit, router) and
 `api/_routes/` (one module per resource, plain functions) are dispatched by
 the three `api/{owner,admin,public}/[...route].js` entry points;
-`public/shared/` (design tokens, i18n, formatters, the month-calendar
-component, the fetch wrapper) is used by `public/{b,admin,owner}/` — the
-booker, teacher, and owner front-ends respectively; `scripts/` holds
-`migrate.js`, `seed.js`, and `smoke.js`.
+`public/shared/` (design tokens, i18n, formatters, shared UI components, the
+month-calendar component, the fetch wrapper) is used by
+`public/{b,admin,owner}/` — the booker, teacher, and owner front-ends
+respectively.
+
+`scripts/` holds `migrate.js` and `seed.js` (schema and owner bootstrap),
+`smoke.js` (the API suite from *plan.md*), `devserver.js` (§3),
+`seed-qa.js` and `uiqa.js` (§5).

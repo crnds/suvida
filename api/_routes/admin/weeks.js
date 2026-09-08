@@ -28,11 +28,11 @@ async function materializeWeek(db, adminId, weekStart) {
   await db.batch(
     [
       {
-        sql: `INSERT OR IGNORE INTO slots (admin_id, start_unix, source, blocked)
+        sql: `INSERT OR IGNORE INTO slots (admin_id, start_unix, source, blocked, location_id)
               SELECT t.admin_id,
                      CAST(strftime('%s', date(?, '+' || t.weekday || ' days')) AS INTEGER)
                        - ${BANGKOK_OFFSET_SECONDS} + t.start_minutes * 60,
-                     'template', 0
+                     'template', 0, t.location_id
                 FROM templates t
                WHERE t.admin_id = ?`,
         args: [weekStart, adminId],

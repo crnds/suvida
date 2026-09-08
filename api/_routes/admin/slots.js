@@ -27,20 +27,25 @@ export async function listSlots(req, res) {
       return;
     }
     const { start, end } = bangkokDayBounds(req.query.day);
+    const locationId = req.query?.location_id ? Number(req.query.location_id) : null;
     const result = await db.execute({
-      sql: `SELECT s.id, s.start_unix, s.source, s.blocked,
+      sql: `SELECT s.id, s.start_unix, s.source, s.blocked, s.location_id, l.title AS location_title,
                    b.id AS booking_id, b.booker_name, b.booker_phone
               FROM slots s
+              LEFT JOIN locations l ON l.id = s.location_id
               LEFT JOIN bookings b ON b.slot_id = s.id AND b.cancelled_at IS NULL
              WHERE s.admin_id = ? AND s.start_unix >= ? AND s.start_unix < ?
+               AND (? IS NULL OR s.location_id = ?)
              ORDER BY s.start_unix`,
-      args: [req.adminId, start, end],
+      args: [req.adminId, start, end, locationId, locationId],
     });
     const slots = result.rows.map((r) => ({
       id: r.id,
       start_unix: r.start_unix,
       source: r.source,
       blocked: r.blocked,
+      location_id: r.location_id,
+      location_title: r.location_title,
       booking: r.booking_id
         ? { id: r.booking_id, booker_name: r.booker_name, booker_phone: r.booker_phone }
         : null,
@@ -55,12 +60,14 @@ export async function listSlots(req, res) {
       return;
     }
     const { start, end } = monthBounds(req.query.month);
+    const locationId = req.query?.location_id ? Number(req.query.location_id) : null;
     const result = await db.execute({
       sql: `SELECT s.start_unix, s.blocked, b.id AS booking_id
               FROM slots s
               LEFT JOIN bookings b ON b.slot_id = s.id AND b.cancelled_at IS NULL
-             WHERE s.admin_id = ? AND s.start_unix >= ? AND s.start_unix < ?`,
-      args: [req.adminId, start, end],
+             WHERE s.admin_id = ? AND s.start_unix >= ? AND s.start_unix < ?
+               AND (? IS NULL OR s.location_id = ?)`,
+      args: [req.adminId, start, end, locationId, locationId],
     });
     const days = {};
     for (const r of result.rows) {
@@ -81,8 +88,9 @@ export async function listSlots(req, res) {
 // Adds a single slot outside the template (source='override'). Blocking an
 // existing slot is a separate PATCH — see updateSlot.
 export async function addOverrideSlot(req, res) {
-  const { start_unix, blocked } = req.body ?? {};
-  if (!Number.isInteger(start_unix)) {
+  const { start_unix, blocked, location_id } = req.body ?? {};
+  const locationId = Number(location_id);
+  if (!Number.isInteger(start_unix) || !Number.isInteger(locationId)) {
     res.status(400).json({ error: 'invalid_request' });
     return;
   }
@@ -93,18 +101,24 @@ export async function addOverrideSlot(req, res) {
   }
   const db = getDb();
   const result = await db.execute({
-    sql: `INSERT INTO slots (admin_id, start_unix, source, blocked)
-          SELECT ?, ?, 'override', ?
-           WHERE NOT EXISTS (SELECT 1 FROM slots WHERE admin_id = ? AND start_unix = ?)`,
-    args: [req.adminId, start_unix, blocked ? 1 : 0, req.adminId, start_unix],
+    sql: `INSERT INTO slots (admin_id, start_unix, source, blocked, location_id)
+          SELECT ?, ?, 'override', ?, l.id
+            FROM locations l
+           WHERE l.id = ? AND l.admin_id = ?
+             AND NOT EXISTS (SELECT 1 FROM slots WHERE admin_id = ? AND start_unix = ?)`,
+    args: [req.adminId, start_unix, blocked ? 1 : 0, locationId, req.adminId, req.adminId, start_unix],
   });
   if (result.rowsAffected === 0) {
-    res.status(409).json({ error: 'slot_exists' });
+    const locOk = await db.execute({
+      sql: 'SELECT 1 FROM locations WHERE id = ? AND admin_id = ?',
+      args: [locationId, req.adminId],
+    });
+    res.status(locOk.rows[0] ? 409 : 400).json({ error: locOk.rows[0] ? 'slot_exists' : 'invalid_location' });
     return;
   }
   res
     .status(201)
-    .json({ id: Number(result.lastInsertRowid), start_unix, source: 'override', blocked: blocked ? 1 : 0 });
+    .json({ id: Number(result.lastInsertRowid), start_unix, source: 'override', blocked: blocked ? 1 : 0, location_id: locationId });
 }
 
 export async function updateSlot(req, res, params) {

@@ -118,6 +118,35 @@ Cards use generous internal padding and rely on typographic hierarchy to structu
 #3C1518 fill, #F5F0E8 text, 13px Manrope 400 font size, 8px 14px padding, square, 220px max width, 6px triangle arrow, 200ms show, 50ms hide delay, no shadow.
 ---
 
+## Deviations in the Suvida implementation
+
+This file describes the source system. `public/shared/theme.css` implements it
+with the substitutions below; each is commented at its definition there.
+
+- **Typography** is Noto Serif Thai / Noto Sans Thai, not EB Garamond / Manrope —
+  neither ships a Thai subset and Thai is the default language. Heading leading
+  is raised to a 1.3 minimum so Thai tone marks are not clipped. See *i18n &
+  design* in `plan.md`.
+- **Control height is 44px, not 40px.** The 40px figure predates this product's
+  mobile-first requirement; 44px is the iOS/Android comfortable minimum. Small
+  controls are 36px and grow to 40–44px under `pointer: coarse`.
+- **Two contrast corrections.** `Color Info #8B7E74` reads at 3.75:1 on the page
+  background — below the 4.5:1 AA minimum — and it is this app's most-used
+  secondary text colour, so it is darkened along the same warm axis to 5.54:1.
+  The brass accent (3.59:1) is kept as the *brand* colour for focus rings,
+  underlines and icons, with a darker `--accent-text` used wherever it appears
+  as text.
+- **Disabled state is a flat neutral, not 0.35 opacity**, which put a disabled
+  destructive button below contrast minimums.
+- **8px is added to the spacing scale** as the icon-to-label gap: 4px crowds a
+  glyph, 12px detaches it from its word.
+- **Calendar day cards use a 10px radius** — the single exception to the 0px
+  rule, so a month reads as a field of cards rather than a table.
+- **Modals become bottom sheets under 560px**, per `plan.md`'s mobile notes.
+- Everything else — flat surfaces, 0px radius elsewhere, no shadows anywhere,
+  1px borders, the chip and list specs, the hover-inversion button model — is
+  unchanged. Rule 7 below still holds.
+
 ## Do's and Don'ts
 
 1. **Do** treat type hierarchy as the primary design element -- scale, weight, and spacing should carry the entire visual structure.

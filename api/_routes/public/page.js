@@ -57,13 +57,16 @@ export async function getPage(req, res) {
       return;
     }
     const { start, end } = bangkokDayBounds(req.query.day);
+    const locationId = req.query?.location_id ? Number(req.query.location_id) : null;
     const result = await db.execute({
-      sql: `SELECT s.id, s.start_unix
+      sql: `SELECT s.id, s.start_unix, s.location_id, l.title AS location_title
               FROM slots s
+              LEFT JOIN locations l ON l.id = s.location_id
              WHERE s.admin_id = ? AND s.start_unix >= ? AND s.start_unix < ?
                AND ${BOOKABLE_PREDICATE}
+               AND (? IS NULL OR s.location_id = ?)
              ORDER BY s.start_unix`,
-      args: [adminId, start, end, now],
+      args: [adminId, start, end, now, locationId, locationId],
     });
     res.status(200).json({ slots: result.rows });
     return;
@@ -75,19 +78,25 @@ export async function getPage(req, res) {
       return;
     }
     const { start, end } = monthBounds(req.query.month);
+    const locationId = req.query?.location_id ? Number(req.query.location_id) : null;
     const result = await db.execute({
       sql: `SELECT s.start_unix
               FROM slots s
              WHERE s.admin_id = ? AND s.start_unix >= ? AND s.start_unix < ?
-               AND ${BOOKABLE_PREDICATE}`,
-      args: [adminId, start, end, now],
+               AND ${BOOKABLE_PREDICATE}
+               AND (? IS NULL OR s.location_id = ?)`,
+      args: [adminId, start, end, now, locationId, locationId],
     });
     const days = {};
     for (const r of result.rows) {
       const dateStr = bangkokDateString(r.start_unix);
       days[dateStr] = (days[dateStr] ?? 0) + 1;
     }
-    res.status(200).json({ display_name: admin.rows[0].display_name, days });
+    const locations = await db.execute({
+      sql: 'SELECT id, title FROM locations WHERE admin_id = ? ORDER BY id',
+      args: [adminId],
+    });
+    res.status(200).json({ display_name: admin.rows[0].display_name, days, locations: locations.rows });
     return;
   }
 

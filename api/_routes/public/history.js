@@ -42,10 +42,14 @@ export async function getHistory(req, res) {
 
   // INNER JOIN to slots naturally excludes a booking whose slot was later
   // deleted (the documented dangling slot_id case) instead of erroring.
+  // LEFT JOIN to locations is purely defensive — the location-deletion guard
+  // should make a dangling location_id unreachable, but this tolerates one
+  // the same way the rest of the app tolerates a dangling slot_id.
   const result = await db.execute({
-    sql: `SELECT b.id, s.start_unix, b.booker_name
+    sql: `SELECT b.id, s.start_unix, b.booker_name, s.location_id, l.title AS location_title
             FROM bookings b
             JOIN slots s ON s.id = b.slot_id
+            LEFT JOIN locations l ON l.id = s.location_id
            WHERE b.admin_id = ? AND b.booker_phone = ? AND b.cancelled_at IS NULL AND s.start_unix > ?
            ORDER BY s.start_unix`,
     args: [admin.rows[0].id, canonPhone, now],

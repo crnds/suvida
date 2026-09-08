@@ -6,39 +6,88 @@
    + Noto Sans Thai (body) replace EB Garamond/Manrope, since neither ships
    a Thai subset — see plan.md "i18n & design". Structural tokens (spacing
    unit, 0px radius, 1px borders, chip variants, success/warning/error) are
-   kept unchanged from DESIGN.md. */
+   kept unchanged from DESIGN.md.
+
+   Hierarchy is carried by type scale, weight, colour and whitespace — never
+   by elevation. Before adding a border, ask whether space would do the job:
+   DESIGN.md's flat surfaces only read as refined if they stay rare. */
 
 :root {
+  /* ── Surfaces ─────────────────────────────────────────── */
   --surface: #fbf9f6;
   --surface-card: #ffffff;
   --surface-alt: #ede8de;
+  --surface-sunken: #f4f1eb;
   --surface-error: #fdf6f5;
+  --surface-warning: #fdf3e7;
+  --surface-success: #eef6f0;
+
+  /* ── Brand ────────────────────────────────────────────── */
   --primary: #1a1815;
+  /* Hover/active are steps *away* from the page, not tints of it, so an
+     inverting button (DESIGN.md's hover model) still has somewhere to go. */
+  --primary-hover: #33302b;
+  --primary-active: #0d0c0a;
+  /* Brass is the brand colour, and at 3.59:1 on --surface it clears the 3:1
+     non-text minimum but not the 4.5:1 needed for body copy. So it stays the
+     brand mark — focus rings, the active-tab underline, icons — and text that
+     happens to be accent-coloured (links, ghost buttons) uses --accent-text,
+     which is the same hue darkened to 4.96:1. */
   --accent: #a67c3d;
+  --accent-text: #8a6631;
+  --accent-text-hover: #6f4f26;
+
+  /* ── Lines ────────────────────────────────────────────── */
+  --border-subtle: #e6e0d6;
   --border: #d6cfc4;
   --border-strong: var(--primary);
-  --text: var(--primary);
-  --text2: #8b7e74;
-  --muted: #b5a99a;
+  --border-success: #cfe0d3;
+  --border-error: #ecd5d1;
 
+  /* ── Text ─────────────────────────────────────────────── */
+  --text: var(--primary);
+  /* Secondary text: labels, captions, helper text, inactive tabs, row meta.
+     DESIGN.md's #8B7E74 reads at 3.75:1 on --surface — under the 4.5:1 AA
+     minimum for normal text, and it is the most-used colour in the app after
+     --text. Darkened along the same warm axis to 5.54:1, which also clears
+     AA on the tinted --surface-alt a row hover paints behind it.
+     --text-quiet was a near-identical second token that existed only to work
+     around the old value, so it now aliases this one. */
+  --text2: #6f635a;
+  --text-quiet: var(--text2);
+  /* Decorative only — icons and rules, never text a user has to read. */
+  --muted: #b5a99a;
+  /* Past calendar dates. They are disabled controls, which WCAG 1.4.3 exempts
+     from a contrast minimum, but --muted at 2.19:1 was too faint to scan a
+     month by. 3.33:1 clears the non-text threshold and still reads as inert. */
+  --text-inactive: #948779;
+  --text-on-dark: #f5f0e8;
+
+  /* ── Status ───────────────────────────────────────────── */
   --color-success: #3d7a4a;
   --color-warning: #b45309;
   --color-error: #a44a3f;
-  --color-info: #8b7e74;
+  --color-info: var(--text2);
+  --focus: var(--accent);
 
-  /* Calendar day-card tints. --muted (#b5a99a) reads at only 1.89:1 on
-     --surface-alt, so quiet card text uses --text-quiet (4.95:1) instead. */
-  --surface-success: #eef6f0;
-  --border-success: #cfe0d3;
-  --border-error: #ecd5d1;
-  --text-quiet: #6b6157;
-
+  /* ── Geometry ─────────────────────────────────────────── */
   --radius: 0px;
   /* Calendar day cards are the one rounded surface — a deliberate exception to
      DESIGN.md's 0px rule, so a month reads as a field of cards, not a table. */
   --radius-card: 10px;
   --shadow: none;
+  --border-w: 1px;
 
+  /* Control sizes. 44px is the iOS/Android comfortable minimum; DESIGN.md's
+     40px predates the mobile-first requirement in plan.md. --control-h-sm
+     stays denser for secondary row actions and grows on touch (see the
+     `pointer: coarse` block). */
+  --control-h: 44px;
+  --control-h-sm: 36px;
+  --control-h-lg: 52px;
+  --tap-min: 44px;
+
+  /* ── Spacing ──────────────────────────────────────────── */
   --space-1: 4px;
   --space-2: 12px;
   --space-3: 24px;
@@ -47,14 +96,34 @@
   --space-6: 72px;
   --space-8: 96px;
   --space-10: 120px;
+  /* One addition to DESIGN.md's scale: 8px, the icon-to-label and
+     chip-internal gap. 4px crowds a glyph, 12px detaches it from its word. */
+  --space-icon: 8px;
 
+  /* Page gutter grows with the viewport instead of stepping at breakpoints. */
+  --gutter: clamp(var(--space-1), 3vw, var(--space-3));
+
+  /* ── Type ─────────────────────────────────────────────── */
   --font-head: 'Noto Serif Thai', 'EB Garamond', serif;
   --font-body: 'Noto Sans Thai', 'Manrope', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --measure: 66ch;
+
+  /* ── Motion ───────────────────────────────────────────── */
+  --dur-fast: 0.12s;
+  --dur: 0.18s;
+  --ease: cubic-bezier(0.2, 0, 0.2, 1);
+
+  /* ── Layers ───────────────────────────────────────────── */
+  --z-header: 20;
+  --z-modal: 100;
+  --z-toast: 200;
 }
 
 *, *::before, *::after { box-sizing: border-box; }
 
 html, body { margin: 0; padding: 0; }
+
+html { -webkit-text-size-adjust: 100%; }
 
 body {
   background: var(--surface);
@@ -64,81 +133,141 @@ body {
   font-size: 16px;
   line-height: 1.7;
   -webkit-font-smoothing: antialiased;
+  /* Kills the grey flash on tap without removing any real focus affordance. */
+  -webkit-tap-highlight-color: transparent;
+  /* A long Thai word or an over-wide table must never scroll the page. */
+  overflow-x: hidden;
 }
 
-a { color: var(--accent); }
+a { color: var(--accent-text); text-underline-offset: 0.18em; }
+a:hover { color: var(--accent-text-hover); }
 
 img { max-width: 100%; display: block; }
+
+/* Inputs and buttons don't inherit the page font on their own. */
+button, input, select, textarea { font: inherit; color: inherit; }
 
 /* ── Typography ─────────────────────────────────────────── */
 /* Thai stacks vowels/tone marks above and below the baseline, so DESIGN.md's
    tight heading leading clips them — minimums here are 1.3 for headings,
-   1.7 for body (plan.md "Thai line-height"). */
+   1.7 for body (plan.md "Thai line-height"). Do not tighten. */
 
-h1, h2, h3, .text-hero, .text-h1, .text-h2, .text-h3 {
+h1, h2, h3, h4, .text-hero, .text-h1, .text-h2, .text-h3 {
   font-family: var(--font-head);
   font-weight: 500;
   margin: 0;
   color: var(--primary);
+  /* Long Thai compounds have no spaces to break at. */
+  overflow-wrap: break-word;
 }
 
-.text-hero { font-size: clamp(2.5rem, 6vw, 5rem); line-height: 1.3; font-weight: 400; }
-.text-h1, h1 { font-size: clamp(2rem, 5vw, 3.5rem); line-height: 1.3; }
-.text-h2, h2 { font-size: clamp(1.5rem, 3.5vw, 2.25rem); line-height: 1.3; font-weight: 500; }
-.text-h3, h3 { font-size: clamp(1.15rem, 2.5vw, 1.5rem); line-height: 1.3; font-weight: 500; }
+.text-hero { font-size: clamp(2.5rem, 6vw, 5rem); line-height: 1.3; font-weight: 400; letter-spacing: -0.01em; }
+.text-h1, h1 { font-size: clamp(1.75rem, 4.5vw, 3rem); line-height: 1.3; letter-spacing: -0.01em; }
+.text-h2, h2 { font-size: clamp(1.375rem, 3.2vw, 2rem); line-height: 1.3; font-weight: 500; }
+.text-h3, h3 { font-size: clamp(1.125rem, 2.2vw, 1.375rem); line-height: 1.35; font-weight: 500; }
 
-.text-body-lg { font-size: 18px; font-weight: 300; line-height: 1.7; }
+/* Was weight 300. Nothing used it, and dropping it takes a whole weight off
+   the render-blocking Google Fonts request. */
+.text-body-lg { font-size: 18px; font-weight: 400; line-height: 1.7; }
 .text-body { font-size: 16px; font-weight: 400; line-height: 1.7; }
 .text-caption { font-size: 12px; font-weight: 500; line-height: 1.5; color: var(--text2); }
+/* Form labels and helper text — the two steps DESIGN.md's scale never named,
+   which is why they were being improvised per-component. */
+.text-label { font-size: 13px; font-weight: 500; line-height: 1.4; color: var(--text2); }
+.text-helper { font-size: 12px; font-weight: 400; line-height: 1.5; color: var(--text2); }
 
 .tabular-nums { font-variant-numeric: tabular-nums; }
+.measure { max-width: var(--measure); }
 
 /* ── Layout ─────────────────────────────────────────────── */
 
 .page {
   max-width: 720px;
   margin: 0 auto;
-  padding: var(--space-3) var(--space-3) var(--space-8);
+  padding: var(--space-3) var(--gutter) var(--space-8);
 }
 
-.app-shell { max-width: 960px; margin: 0 auto; padding: 0 var(--space-3) var(--space-8); }
+.app-shell {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: var(--space-3) var(--gutter) var(--space-8);
+}
 
 .stack { display: flex; flex-direction: column; gap: var(--space-3); }
 .stack-tight { display: flex; flex-direction: column; gap: var(--space-2); }
 .row { display: flex; align-items: center; gap: var(--space-2); }
 .row-between { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
-.row-wrap { display: flex; flex-wrap: wrap; gap: var(--space-2); }
-.grid-auto { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: var(--space-3); }
+.row-wrap { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.grid-auto { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: var(--space-3); }
 
-/* ── Header / nav ───────────────────────────────────────── */
+/* A headed group that needs no box. Preferred over .card for page-level
+   grouping — see the note at the top of this file. */
+.section { display: flex; flex-direction: column; gap: var(--space-2); }
+.section + .section { margin-top: var(--space-5); }
+/* A page title must not sit as close to the first section heading as two
+   sections sit to each other, or it reads as that section's subtitle. */
+:is(h1, h2, .text-h1, .text-h2) + .section { margin-top: var(--space-4); }
+.section__head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-2); flex-wrap: wrap; }
+.section__title { font-family: var(--font-head); font-size: 18px; font-weight: 500; margin: 0; }
+.section__hint { margin: 0; max-width: var(--measure); }
+
+/* ── Header ─────────────────────────────────────────────── */
 
 .app-header {
   position: sticky;
   top: 0;
-  z-index: 20;
+  z-index: var(--z-header);
   background: var(--surface);
-  border-bottom: 1px solid var(--border);
-  padding: var(--space-2) var(--space-3);
+  border-bottom: var(--border-w) solid var(--border);
+  padding: var(--space-2) var(--gutter);
+  padding-top: max(var(--space-2), env(safe-area-inset-top));
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-2);
 }
 
-.app-header__brand { font-family: var(--font-head); font-size: 20px; font-weight: 500; }
-.app-header__meta { color: var(--text2); font-size: 13px; }
+.app-header__brand {
+  font-family: var(--font-head);
+  font-size: clamp(1rem, 4vw, 1.25rem);
+  font-weight: 500;
+  line-height: 1.3;
+  margin: 0;
+  /* The studio name is the one thing allowed to truncate rather than push
+     the language toggle and sign-out off screen. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-header__actions { display: flex; align-items: center; gap: var(--space-icon); flex: none; }
+
+/* ── Tabs ───────────────────────────────────────────────── */
 
 .tabs {
   display: flex;
   gap: 0;
-  border-bottom: 1px solid var(--border);
+  border-bottom: var(--border-w) solid var(--border);
   overflow-x: auto;
+  scrollbar-width: none;
+  /* Snap so a half-scrolled tab never looks like a rendering bug. */
+  scroll-snap-type: x proximity;
   margin-bottom: var(--space-3);
+  /* Fade the right edge so an off-screen tab reads as "more", not "cut off". */
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
 }
+.tabs::-webkit-scrollbar { display: none; }
 
 .tab {
   position: relative;
-  padding: var(--space-2) var(--space-3);
+  scroll-snap-align: start;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-icon);
+  min-height: var(--tap-min);
+  padding: 0 var(--space-3);
   font-family: var(--font-body);
   font-size: 14px;
   font-weight: 500;
@@ -147,14 +276,12 @@ h1, h2, h3, .text-hero, .text-h1, .text-h2, .text-h3 {
   border: none;
   cursor: pointer;
   white-space: nowrap;
-  transition: color 0.15s ease;
+  transition: color var(--dur) var(--ease);
 }
 
+.tab:first-child { padding-left: 0; }
 .tab:hover { color: var(--primary); }
-
-.tab[aria-selected="true"] {
-  color: var(--primary);
-}
+.tab[aria-selected="true"] { color: var(--primary); }
 
 .tab[aria-selected="true"]::after {
   content: '';
@@ -163,6 +290,10 @@ h1, h2, h3, .text-hero, .text-h1, .text-h2, .text-h3 {
   height: 2px;
   background: var(--accent);
 }
+.tab:first-child[aria-selected="true"]::after { right: var(--space-2); }
+
+.tab .icon { color: var(--text2); transition: color var(--dur) var(--ease); }
+.tab[aria-selected="true"] .icon { color: var(--accent); }
 
 .tab-badge {
   display: inline-flex;
@@ -171,13 +302,37 @@ h1, h2, h3, .text-hero, .text-h1, .text-h2, .text-h3 {
   min-width: 18px;
   height: 18px;
   padding: 0 5px;
-  margin-left: var(--space-1);
   background: var(--color-error);
   color: #fff;
   font-size: 11px;
   font-weight: 600;
+  line-height: 1;
   border-radius: 999px;
 }
+.tab-badge:empty { display: none; }
+
+/* ── Icons ──────────────────────────────────────────────── */
+/* Font Awesome, used only where it aids scanning. Every icon is decorative
+   at the a11y layer (aria-hidden) and sits beside real text, so a blocked
+   CDN degrades to a fully labelled UI rather than a row of blank squares.
+   Fixed width keeps glyphs of different natural widths optically aligned
+   down a column of rows. */
+
+.icon {
+  display: inline-block;
+  width: 1em;
+  text-align: center;
+  flex: none;
+  font-size: 0.95em;
+  line-height: 1;
+  /* Cap heights differ between Noto Sans Thai and FA; this centres the glyph
+     on the text it labels instead of on the line box. */
+  vertical-align: -0.08em;
+}
+
+.icon--lg { font-size: 1.15em; }
+/* The one place an icon carries weight on its own: empty and success states. */
+.icon--display { font-size: 28px; color: var(--muted); margin-bottom: var(--space-2); }
 
 /* ── Buttons ────────────────────────────────────────────── */
 
@@ -190,97 +345,217 @@ h1, h2, h3, .text-hero, .text-h1, .text-h2, .text-h3 {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: var(--space-1);
-  height: 40px;
-  padding: 0 24px;
+  gap: var(--space-icon);
+  min-height: var(--control-h);
+  padding: 0 var(--space-3);
   font-size: 14px;
   min-width: 100px;
-  border: 1px solid transparent;
+  border: var(--border-w) solid transparent;
   white-space: nowrap;
   flex: none;
-  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+  text-decoration: none;
+  transition:
+    background-color var(--dur) var(--ease),
+    color var(--dur) var(--ease),
+    border-color var(--dur) var(--ease),
+    opacity var(--dur) var(--ease);
 }
 
-.btn-sm { height: 32px; padding: 0 16px; font-size: 12px; min-width: 72px; }
-.btn-lg { height: 48px; padding: 0 32px; font-size: 16px; min-width: 128px; }
+.btn-sm { min-height: var(--control-h-sm); padding: 0 var(--space-2); font-size: 13px; min-width: 0; }
+.btn-lg { min-height: var(--control-h-lg); padding: 0 var(--space-4); font-size: 16px; min-width: 128px; }
+/* Fills its container — replaces per-page inline width overrides. */
+.btn-block { width: 100%; }
 
-.btn-primary { background: var(--primary); color: var(--surface); border-color: var(--primary); }
+.btn-primary { background: var(--primary); color: var(--text-on-dark); border-color: var(--primary); }
 .btn-primary:hover:not(:disabled) { background: var(--surface); color: var(--primary); }
+.btn-primary:active:not(:disabled) { background: var(--primary-active); color: var(--text-on-dark); }
 
 .btn-secondary { background: transparent; color: var(--primary); border-color: var(--primary); }
-.btn-secondary:hover:not(:disabled) { background: var(--primary); color: var(--surface); }
+.btn-secondary:hover:not(:disabled) { background: var(--primary); color: var(--text-on-dark); }
+.btn-secondary:active:not(:disabled) { background: var(--primary-active); color: var(--text-on-dark); }
 
-.btn-ghost { background: transparent; color: var(--accent); border-color: transparent; }
-.btn-ghost:hover:not(:disabled) { background: var(--surface-alt); }
+/* Tertiary: quieter than secondary, still visibly a control — for the
+   third-ranked action in a row, where a ghost link would disappear. */
+.btn-tertiary { background: transparent; color: var(--text); border-color: var(--border); }
+.btn-tertiary:hover:not(:disabled) { background: var(--surface-alt); border-color: var(--text2); }
+
+.btn-ghost { background: transparent; color: var(--accent-text); border-color: transparent; }
+.btn-ghost:hover:not(:disabled) { background: var(--surface-alt); color: var(--accent-text-hover); }
 
 .btn-destructive { background: var(--color-error); color: #fff; border-color: var(--color-error); }
 .btn-destructive:hover:not(:disabled) { background: var(--surface); color: var(--color-error); }
 
-.btn:disabled { opacity: 0.35; cursor: not-allowed; }
+/* Icon-only. The ::after expands the hit area to --tap-min without letting
+   a 36px button push a dense row taller. */
+.btn-icon {
+  position: relative;
+  min-width: var(--control-h-sm);
+  width: var(--control-h-sm);
+  min-height: var(--control-h-sm);
+  padding: 0;
+  gap: 0;
+}
+.btn-icon::after {
+  content: '';
+  position: absolute;
+  top: 50%; left: 50%;
+  width: var(--tap-min); height: var(--tap-min);
+  transform: translate(-50%, -50%);
+}
 
-.btn:focus-visible, .tab:focus-visible, a:focus-visible {
-  outline: 2px solid var(--accent);
+.btn:disabled, .btn[aria-disabled="true"] {
+  /* DESIGN.md's 0.35 drops a destructive button below contrast minimums, so
+     disabled is expressed as a flat neutral instead of a fade. */
+  background: var(--surface-alt);
+  color: var(--text-quiet);
+  border-color: var(--border);
+  cursor: not-allowed;
+  opacity: 1;
+}
+.btn-ghost:disabled { background: transparent; border-color: transparent; }
+
+/* Loading. The spinner replaces the label rather than sitting beside it, so
+   the button can't change width mid-request and shift the layout. */
+.btn[data-loading="true"] { color: transparent; position: relative; pointer-events: none; }
+.btn[data-loading="true"] > * { visibility: hidden; }
+.btn[data-loading="true"]::before {
+  content: '';
+  position: absolute;
+  top: 50%; left: 50%;
+  width: 16px; height: 16px;
+  margin: -8px 0 0 -8px;
+  border: 2px solid currentColor;
+  border-color: color-mix(in srgb, currentColor 30%, transparent);
+  border-top-color: currentColor;
+  border-radius: 999px;
+  color: var(--text-on-dark);
+  animation: spin 0.7s linear infinite;
+}
+.btn-secondary[data-loading="true"]::before,
+.btn-tertiary[data-loading="true"]::before,
+.btn-ghost[data-loading="true"]::before { color: var(--primary); }
+
+:where(.btn, .tab, .chip, .calendar-day, .slot-list__item, .list-row, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
 
-/* ── Cards ──────────────────────────────────────────────── */
+/* ── Cards & surfaces ───────────────────────────────────── */
 
 .card {
   background: var(--surface-card);
-  border: 1px solid var(--border);
+  border: var(--border-w) solid var(--border);
   border-radius: var(--radius);
-  padding: var(--space-4);
-  transition: border-color 0.15s ease;
+  padding: var(--space-3);
+  transition: border-color var(--dur) var(--ease);
 }
 
+@media (min-width: 769px) { .card { padding: var(--space-4); } }
+
 .card--hover:hover { border-color: var(--primary); }
+.card--quiet { background: var(--surface-sunken); border-color: transparent; }
 
 .card-title { font-family: var(--font-head); font-size: 18px; font-weight: 500; margin: 0 0 var(--space-2); }
+/* A hint directly under a title belongs to it — pull it out of the body flow. */
+.card-title + .text-caption { margin-top: calc(var(--space-2) * -1); margin-bottom: var(--space-2); max-width: var(--measure); }
 
-/* ── Inputs ─────────────────────────────────────────────── */
+/* ── Forms ──────────────────────────────────────────────── */
 
-.field { display: flex; flex-direction: column; gap: var(--space-1); }
+.field { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+.field--grow { flex: 1 1 12rem; }
+.field--narrow { flex: 0 0 auto; max-width: 8rem; }
 
-.field label {
+.field label, .field > .text-label {
   font-size: 13px;
   font-weight: 500;
   color: var(--text2);
 }
 
+/* A form's controls, aligned on their bottom edge and allowed to wrap.
+   Replaces the per-page `style="align-self: flex-end"` on every submit. */
+.form-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-2);
+}
+.form-row > .btn { margin-bottom: 0; }
+
 .input, select.input, textarea.input {
   font-family: var(--font-body);
+  /* 16px keeps iOS Safari from zooming the page on focus. Do not reduce. */
   font-size: 16px;
   line-height: 1.4;
-  height: 40px;
-  padding: 0 12px;
-  background: #fff;
+  height: var(--control-h);
+  padding: 0 var(--space-2);
+  background: var(--surface-card);
   color: var(--text);
-  border: 1px solid var(--text2);
+  border: var(--border-w) solid var(--text2);
   border-radius: var(--radius);
   width: 100%;
+  min-width: 0;
+  transition: border-color var(--dur) var(--ease);
 }
 
-textarea.input { height: auto; padding: 10px 12px; min-height: 80px; }
+select.input {
+  /* Native selects render as an OS control on macOS/iOS and look nothing
+     like the rest of the system; this restores the flat editorial box and
+     draws the chevron as a background image. */
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: var(--space-5);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath fill='none' stroke='%238b7e74' stroke-width='1.5' d='M1 1.5 6 6.5 11 1.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right var(--space-2) center;
+  background-size: 12px 8px;
+}
 
-.input:hover { border-color: var(--primary); }
+textarea.input { height: auto; padding: 10px var(--space-2); min-height: 80px; }
+
+.input:hover:not(:disabled) { border-color: var(--primary); }
 .input:focus, .input:focus-visible {
   outline: none;
-  border: 2px solid var(--accent);
-  padding: 0 11px;
+  /* An inset box-shadow rather than a 2px border, so focusing a field can't
+     change its box size and nudge the row (the old rule compensated with a
+     padding tweak, which broke on selects). */
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
 }
 
-.input.is-error { border-color: var(--color-error); background: var(--surface-error); }
-.input:disabled { border-color: var(--border); background: var(--surface-alt); color: var(--muted); cursor: not-allowed; }
+/* Invalid state is driven by aria-invalid, so the styling and the thing a
+   screen reader announces can never disagree. */
+.input[aria-invalid="true"] {
+  border-color: var(--color-error);
+  background: var(--surface-error);
+}
+.input[aria-invalid="true"]:focus {
+  box-shadow: inset 0 0 0 1px var(--color-error);
+}
 
-.field-error { font-size: 12px; color: var(--color-error); }
-.field-hint { font-size: 12px; color: var(--text2); }
+.input:disabled, .input[readonly] {
+  border-color: var(--border);
+  background: var(--surface-alt);
+  color: var(--text-quiet);
+}
+.input:disabled { cursor: not-allowed; }
 
-.checkbox-row { display: flex; align-items: center; gap: var(--space-2); }
+.field-error {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-icon);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-error);
+}
+.field-hint { font-size: 12px; line-height: 1.5; color: var(--text2); }
+
+.checkbox-row { display: flex; align-items: center; gap: var(--space-icon); min-height: var(--control-h); }
+.checkbox-row label { font-size: 14px; cursor: pointer; }
+
 input[type="checkbox"], input[type="radio"] {
-  width: 18px; height: 18px; accent-color: var(--primary);
-}
-input[type="checkbox"]:focus-visible, input[type="radio"]:focus-visible {
-  outline: 2px solid var(--accent); outline-offset: 2px;
+  width: 18px; height: 18px; flex: none;
+  accent-color: var(--primary);
+  cursor: pointer;
 }
 
 /* ── Chips ──────────────────────────────────────────────── */
@@ -288,99 +563,170 @@ input[type="checkbox"]:focus-visible, input[type="radio"]:focus-visible {
 .chip {
   display: inline-flex;
   align-items: center;
-  height: 32px;
-  padding: 0 14px;
+  gap: var(--space-icon);
+  min-height: var(--control-h-sm);
+  padding: 0 var(--space-2);
   font-size: 13px;
   font-weight: 500;
   line-height: 1.4;
-  border: 1px solid var(--border);
+  border: var(--border-w) solid var(--border);
+  border-radius: var(--radius);
   color: var(--text2);
   background: transparent;
   cursor: pointer;
   white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
 .chip:hover { background: var(--surface-alt); color: var(--primary); border-color: var(--text2); }
-.chip[aria-pressed="true"] { background: var(--primary); color: var(--surface); border-color: var(--primary); }
+.chip[aria-pressed="true"] { background: var(--primary); color: var(--text-on-dark); border-color: var(--primary); }
+
+/* Segmented pair (the language toggle) — one outline, not two. */
+.chip-group { display: inline-flex; }
+.chip-group .chip + .chip { margin-left: -1px; }
 
 .status-chip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 28px;
-  padding: 0 12px;
-  font-size: 12px;
-  font-weight: 500;
+  height: 24px;
+  padding: 0 var(--space-icon);
+  font-size: 11px;
+  font-weight: 600;
   line-height: 1.4;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   white-space: nowrap;
+  border-radius: var(--radius);
 }
-.status-chip::before { content: ''; width: 7px; height: 7px; border-radius: 999px; background: currentColor; }
+.status-chip::before { content: ''; width: 6px; height: 6px; border-radius: 999px; background: currentColor; flex: none; }
 
-.status-chip--free { background: var(--color-success); color: #f5f0e8; }
-.status-chip--booked { background: var(--primary); color: var(--surface); }
-.status-chip--moved { background: var(--color-error); color: #f5f0e8; }
-.status-chip--cancelled { background: var(--surface-alt); color: #b5a99a; }
-.status-chip--edited { background: transparent; color: var(--text2); border: 1px solid var(--border); }
+.status-chip--free { background: var(--surface-success); color: var(--color-success); box-shadow: inset 0 0 0 1px var(--border-success); }
+.status-chip--booked { background: var(--primary); color: var(--text-on-dark); }
+.status-chip--moved { background: var(--surface-error); color: var(--color-error); box-shadow: inset 0 0 0 1px var(--border-error); }
+/* Was #b5a99a on --surface-alt: 1.9:1. --text-quiet is 4.95:1. */
+.status-chip--cancelled { background: var(--surface-alt); color: var(--text-quiet); }
+.status-chip--edited { background: transparent; color: var(--text2); box-shadow: inset 0 0 0 1px var(--border); }
 
-/* ── Slot list (one time range per line) ───────────────────── */
+/* ── Slot list (one time range per line) ────────────────── */
 
 .slot-list { display: flex; flex-direction: column; gap: var(--space-1); }
+
 .slot-list__item {
   display: flex;
   align-items: center;
+  gap: var(--space-2);
   width: 100%;
-  min-height: 48px;
-  padding: 0 var(--space-3);
-  font-size: 15px;
+  min-height: 56px;
+  padding: 0 var(--space-2) 0 var(--space-3);
+  font-size: 16px;
   font-weight: 500;
-  border: 1px solid var(--border);
+  border: var(--border-w) solid var(--border);
+  border-radius: var(--radius);
   color: var(--text);
-  background: transparent;
+  background: var(--surface-card);
   cursor: pointer;
   text-align: left;
+  transition: background-color var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
-.slot-list__item:hover { background: var(--surface-alt); color: var(--primary); border-color: var(--text2); }
+.slot-list__item:hover { background: var(--surface-alt); border-color: var(--primary); }
+.slot-list__item:active { background: var(--surface-alt); }
+
+.slot-list__time { flex: 1; min-width: 0; }
+.slot-list__meta { font-size: 12px; font-weight: 400; color: var(--text2); display: block; }
+/* The chevron is the affordance that says "this leads somewhere". */
+.slot-list__go { color: var(--muted); flex: none; transition: color var(--dur) var(--ease), transform var(--dur) var(--ease); }
+.slot-list__item:hover .slot-list__go { color: var(--accent); transform: translateX(2px); }
 
 /* ── Lists ──────────────────────────────────────────────── */
 
-.list { border-top: 1px solid var(--border); }
+.list { border-top: var(--border-w) solid var(--border); }
+
 .list-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-2);
-  min-height: 48px;
-  padding: var(--space-1) var(--space-3);
-  border-bottom: 1px solid var(--border);
-  font-size: 16px;
+  /* Wrapping is the default: a row is a name plus a variable set of actions,
+     and on a narrow screen the actions must be allowed to drop to a line of
+     their own rather than overflow the viewport. */
+  flex-wrap: wrap;
+  min-height: var(--tap-min);
+  padding: var(--space-icon) 0;
+  border-bottom: var(--border-w) solid var(--border);
+  font-size: 15px;
 }
-.list-row:hover { background: var(--surface-alt); cursor: pointer; }
-.list-row--active { background: var(--primary); color: var(--surface); }
-.list-row--static:hover { background: none; cursor: default; }
 
-/* ── Badges / dots ──────────────────────────────────────── */
+.list-row__main { flex: 1 1 12rem; min-width: 0; }
+.list-row__actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-icon); flex: none; }
+.list-row__meta { color: var(--text2); font-size: 12px; line-height: 1.5; }
+
+.list-row:hover { background: var(--surface-alt); cursor: pointer; }
+.list-row--active { background: var(--primary); color: var(--text-on-dark); }
+.list-row--static:hover { background: none; cursor: default; }
+/* Forces the two-line form regardless of width — used where the primary
+   text is long enough that side-by-side never reads well. In a column flex
+   container the basis above would apply to the *height*, so it has to be
+   reset wherever the row stacks. */
+.list-row--stacked { flex-direction: column; align-items: flex-start; gap: var(--space-1); }
+.list-row--stacked > .list-row__main { flex: 0 0 auto; width: 100%; }
+
+/* ── Banners ────────────────────────────────────────────── */
 
 .dot { width: 8px; height: 8px; border-radius: 999px; background: var(--color-error); display: inline-block; flex: none; }
+/* Calendar legend swatches — the colours belong here, not in a style
+   attribute repeated three times in the markup. */
+.dot--free { background: var(--color-success); }
+.dot--booked { background: var(--primary); }
+.dot--blocked { background: var(--text-quiet); }
 
 .banner {
-  border: 1px solid var(--color-warning);
-  background: #fdf3e7;
-  color: var(--color-warning);
-  padding: var(--space-2) var(--space-3);
-  font-size: 14px;
   display: flex;
-  align-items: center;
-  gap: var(--space-2);
+  align-items: flex-start;
+  gap: var(--space-icon);
+  border: var(--border-w) solid var(--color-warning);
+  background: var(--surface-warning);
+  color: var(--color-warning);
+  padding: var(--space-2);
+  font-size: 14px;
+  line-height: 1.6;
+  border-radius: var(--radius);
 }
+.banner .icon { margin-top: 0.25em; }
+.banner__text { min-width: 0; }
+/* Replaces the inline margin every caller used to set by hand. */
+.banner + * { margin-top: var(--space-2); }
 
 .banner--error { border-color: var(--color-error); background: var(--surface-error); color: var(--color-error); }
-.banner--success { border-color: var(--color-success); background: var(--surface-success); color: var(--color-success); }
+.banner--success { border-color: var(--border-success); background: var(--surface-success); color: var(--color-success); }
+.banner--info { border-color: var(--border); background: var(--surface-sunken); color: var(--text); }
 
 /* ── Calendar ───────────────────────────────────────────── */
 
-.calendar-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-2); }
-.calendar-nav__label { font-family: var(--font-head); font-size: 20px; font-weight: 500; }
+.calendar-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+.calendar-nav__label {
+  font-family: var(--font-head);
+  font-size: clamp(1.0625rem, 3.5vw, 1.25rem);
+  font-weight: 500;
+  text-align: center;
+  flex: 1;
+  min-width: 0;
+}
+/* Month paging was a 12px chevron in a 32px ghost button — the weakest
+   affordance on the most-used control in the app. */
+.calendar-nav .btn {
+  border-color: var(--border);
+  color: var(--text);
+}
+.calendar-nav .btn:hover:not(:disabled) { background: var(--surface-alt); border-color: var(--primary); color: var(--primary); }
 
 /* One day = one card. minmax(0,1fr) + min-width:0 stop a long Thai label's
    min-content width from widening a track and scrolling the page sideways. */
@@ -392,25 +738,26 @@ input[type="checkbox"]:focus-visible, input[type="radio"]:focus-visible {
 
 .calendar-weekday {
   text-align: center;
-  font-size: 12px;
-  font-weight: 500;
+  font-size: 11px;
+  font-weight: 600;
   color: var(--text2);
   padding: 0 0 var(--space-1);
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 .calendar-day {
   background: var(--surface-card);
-  border: 1px solid var(--border);
+  border: var(--border-w) solid var(--border);
   border-radius: var(--radius-card);
-  min-height: 88px;
+  min-height: 76px;
   min-width: 0;
-  padding: 6px 2px;
+  padding: var(--space-icon) 2px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 2px;
+  justify-content: flex-start;
+  gap: 3px;
   cursor: pointer;
   font-family: var(--font-body);
   font-size: 11px;
@@ -419,14 +766,15 @@ input[type="checkbox"]:focus-visible, input[type="radio"]:focus-visible {
   width: 100%;
   overflow: hidden;
   overflow-wrap: anywhere;
+  transition: border-color var(--dur) var(--ease), background-color var(--dur) var(--ease);
 }
 
-.calendar-day__num { font-family: var(--font-head); font-size: 18px; font-weight: 500; line-height: 1.3; }
+.calendar-day__num { font-family: var(--font-head); font-size: 17px; font-weight: 500; line-height: 1.2; }
 .calendar-day__info { display: flex; flex-direction: column; align-items: center; gap: 2px; }
-.calendar-day__slots { font-weight: 500; line-height: 1.35; }
-.calendar-day__counts { display: flex; flex-direction: column; gap: 1px; line-height: 1.35; }
+.calendar-day__slots { font-weight: 500; line-height: 1.3; }
+.calendar-day__counts { display: flex; flex-direction: column; gap: 1px; line-height: 1.3; }
 .calendar-day__dots { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px; max-width: 100%; }
-.calendar-day__dot { width: 8px; height: 8px; border-radius: 999px; background: currentColor; flex: none; }
+.calendar-day__dot { width: 6px; height: 6px; border-radius: 999px; background: currentColor; flex: none; }
 /* Admin mixes free/booked/blocked dots on one day, so each needs its own
    colour instead of inheriting the card's single state colour. */
 .calendar-day__dot.calendar-day__dot--free { background: var(--color-success); }
@@ -437,9 +785,11 @@ input[type="checkbox"]:focus-visible, input[type="radio"]:focus-visible {
    which most closed and every past day also matches. */
 .calendar-day.calendar-day--free { background: var(--surface-success); border-color: var(--border-success); color: var(--color-success); }
 .calendar-day.calendar-day--full { background: var(--surface-error); border-color: var(--border-error); color: var(--color-error); }
-.calendar-day.calendar-day--closed { background: var(--surface-alt); border-color: transparent; color: var(--text-quiet); }
-.calendar-day.calendar-day--past { background: var(--surface); border-color: var(--border); color: var(--text-quiet); }
-/* A past day's availability is noise — keep the date, drop the label. */
+/* A day with nothing on it should recede, not announce itself: on the
+   booker, twenty "no slots" labels used to shout over the five days that
+   actually had availability. */
+.calendar-day.calendar-day--closed { background: transparent; border-color: var(--border-subtle); color: var(--text-quiet); }
+.calendar-day.calendar-day--past { background: transparent; border-color: transparent; color: var(--text-inactive); }
 .calendar-day--past .calendar-day__info,
 .calendar-day--past .calendar-day__counts { display: none; }
 
@@ -447,16 +797,31 @@ input[type="checkbox"]:focus-visible, input[type="radio"]:focus-visible {
 .calendar-day__count--booked { color: var(--primary); }
 .calendar-day__count--blocked { color: var(--text-quiet); }
 
-/* Ring rather than a border: `--today` co-occurs with a state class, and an
-   inset shadow can't fight it over border-color. Follows border-radius. */
+/* `--today` co-occurs with a state class, so it can't fight it over
+   border-color; an inset ring sidesteps the specificity problem and follows
+   border-radius. Forced-colors drops box-shadow, so that mode gets a real
+   outline instead (see the forced-colors block at the end of this file). */
 .calendar-day--today { box-shadow: inset 0 0 0 2px var(--primary); }
+.calendar-day--today .calendar-day__num { font-weight: 600; }
 
 .calendar-day:hover:not(:disabled) { border-color: var(--primary); }
 .calendar-day:disabled { cursor: default; }
+/* The tapped day, held while its slots load and while its panel is open. */
+.calendar-day[aria-current="true"],
+.calendar-day.is-selected {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--text-on-dark);
+}
+.calendar-day.is-selected .calendar-day__dot { background: var(--text-on-dark); }
 /* Inset, because half the 6px grid gap is less than the theme's 2px offset. */
-.calendar-day:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.calendar-day:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 
 /* ── Modal ──────────────────────────────────────────────── */
+
+/* Stops the page behind the overlay from scrolling under the sheet — the
+   single most obvious "this is a web page, not an app" tell on mobile. */
+body.is-modal-open { overflow: hidden; }
 
 .modal-overlay {
   position: fixed;
@@ -466,24 +831,96 @@ input[type="checkbox"]:focus-visible, input[type="radio"]:focus-visible {
   align-items: center;
   justify-content: center;
   padding: var(--space-3);
-  z-index: 100;
+  z-index: var(--z-modal);
+  animation: overlay-in var(--dur) var(--ease);
 }
 
 .modal {
   background: var(--surface-card);
-  border: 1px solid var(--border);
+  border: var(--border-w) solid var(--border);
+  border-radius: var(--radius);
   width: 100%;
   max-width: 480px;
-  max-height: 88vh;
-  overflow-y: auto;
-  padding: var(--space-3);
+  /* dvh, not vh: on iOS Safari the URL bar is inside vh, so an 88vh sheet
+     could exceed the visible viewport and hide its own action button. */
+  max-height: min(88dvh, 720px);
+  display: flex;
+  flex-direction: column;
+  animation: modal-in var(--dur) var(--ease);
 }
 
-.modal__header { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-3); }
-.modal__close { background: none; border: none; font-size: 20px; cursor: pointer; color: var(--text2); line-height: 1; padding: var(--space-1); }
-.modal__close:hover { color: var(--primary); }
+.modal__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-3) var(--space-2);
+  flex: none;
+}
+.modal__title { font-size: 18px; line-height: 1.4; min-width: 0; }
+.modal__body { padding: 0 var(--space-3) var(--space-3); overflow-y: auto; flex: 1; -webkit-overflow-scrolling: touch; }
 
-/* ── Loading ────────────────────────────────────────────── */
+.modal__close {
+  background: none;
+  border: none;
+  border-radius: var(--radius);
+  cursor: pointer;
+  color: var(--text2);
+  flex: none;
+  width: var(--tap-min);
+  height: var(--tap-min);
+  margin: calc(var(--space-2) * -1) calc(var(--space-2) * -1) 0 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.modal__close:hover { color: var(--primary); background: var(--surface-alt); }
+
+/* A back affordance in the header, for a modal that replaced another one. */
+.modal__back {
+  background: none; border: none; cursor: pointer;
+  color: var(--accent-text); font-size: 13px; font-weight: 500;
+  display: inline-flex; align-items: center; gap: var(--space-icon);
+  padding: var(--space-1) 0; margin-bottom: var(--space-1);
+}
+.modal__back:hover { color: var(--accent-text-hover); }
+
+/* ── Toasts ─────────────────────────────────────────────── */
+
+.toast-region {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--space-3) + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  z-index: var(--z-toast);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-icon);
+  width: min(420px, calc(100vw - var(--space-3) * 2));
+  pointer-events: none;
+}
+
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-icon);
+  padding: var(--space-2);
+  font-size: 14px;
+  line-height: 1.5;
+  border: var(--border-w) solid var(--primary);
+  background: var(--primary);
+  color: var(--text-on-dark);
+  border-radius: var(--radius);
+  pointer-events: auto;
+  animation: toast-in var(--dur) var(--ease);
+}
+.toast--success { background: var(--color-success); border-color: var(--color-success); }
+.toast--error { background: var(--color-error); border-color: var(--color-error); }
+.toast[data-leaving="true"] { animation: toast-out var(--dur) var(--ease) forwards; }
+
+/* ── Loading & empty ────────────────────────────────────── */
 
 .spinner {
   width: 20px; height: 20px;
@@ -492,45 +929,118 @@ input[type="checkbox"]:focus-visible, input[type="radio"]:focus-visible {
   border-radius: 999px;
   animation: spin 0.7s linear infinite;
   display: inline-block;
+  flex: none;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
+@keyframes overlay-in { from { opacity: 0; } }
+@keyframes modal-in { from { opacity: 0; transform: translateY(8px); } }
+@keyframes toast-in { from { opacity: 0; transform: translateY(8px); } }
+@keyframes toast-out { to { opacity: 0; transform: translateY(8px); } }
 
 .loading-row { display: flex; align-items: center; gap: var(--space-2); color: var(--text2); padding: var(--space-3) 0; }
 
-.empty-state { color: var(--text2); text-align: center; padding: var(--space-5) var(--space-2); }
+.empty-state {
+  color: var(--text2);
+  text-align: center;
+  padding: var(--space-4) var(--space-2);
+  font-size: 14px;
+  line-height: 1.6;
+}
+.empty-state__title { color: var(--text); font-weight: 500; margin-bottom: var(--space-1); }
+
+/* Keeps a container's height while its contents are being replaced, so a
+   refresh doesn't collapse the page and bounce the scroll position. */
+[aria-busy="true"] { cursor: progress; }
 
 /* ── Utility ────────────────────────────────────────────── */
 
 .muted { color: var(--text2); }
+.quiet { color: var(--text-quiet); }
 .error-text { color: var(--color-error); }
 .success-text { color: var(--color-success); }
 .hidden { display: none !important; }
+.grow { flex: 1; min-width: 0; }
+.center { text-align: center; }
 .sr-only {
   position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
   overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
 }
+/* Visible only once focused — the skip link. */
+.skip-link {
+  position: absolute; left: var(--space-2); top: var(--space-2);
+  z-index: calc(var(--z-toast) + 1);
+  background: var(--primary); color: var(--text-on-dark);
+  padding: var(--space-1) var(--space-2); font-size: 14px;
+  transform: translateY(-200%);
+}
+.skip-link:focus { transform: none; }
+
+/* A centred, narrow panel — the login/auth column and the landing page. */
+.panel--auth { max-width: 380px; margin: var(--space-6) auto; }
+.landing__lede { margin: var(--space-2) auto var(--space-5); }
 
 /* ── Responsive ─────────────────────────────────────────── */
 
 @media (max-width: 768px) {
-  .page { padding: var(--space-2) var(--space-2) var(--space-6); }
-  .app-shell { padding: 0 var(--space-2) var(--space-6); }
+  .page { padding-bottom: var(--space-6); }
+  .app-shell { padding-bottom: var(--space-6); }
+  .section + .section { margin-top: var(--space-4); }
 }
 
-@media (max-width: 480px) {
-  .btn { min-width: 0; }
-  .modal { padding: var(--space-2); }
-  /* Claw back horizontal room so seven cards keep a ~48px tap width. */
-  .page { padding-left: var(--space-1); padding-right: var(--space-1); }
-  .app-shell { padding-left: var(--space-1); padding-right: var(--space-1); }
+@media (max-width: 560px) {
+  /* Modals become bottom sheets on phones (plan.md, "i18n & design"):
+     anchored to the thumb, full width, and never taller than the visible
+     viewport with the keyboard open. */
+  .modal-overlay { align-items: flex-end; padding: 0; }
+  .modal {
+    max-width: none;
+    max-height: 92dvh;
+    border-left: none;
+    border-right: none;
+    border-bottom: none;
+    padding-bottom: env(safe-area-inset-bottom);
+    animation: sheet-in var(--dur) var(--ease);
+  }
+  @keyframes sheet-in { from { transform: translateY(16px); opacity: 0; } }
+
+  .form-row > .btn { width: 100%; }
+  /* Rows are not force-stacked here: .list-row already wraps, so a row whose
+     actions still fit (a single icon button) keeps them on the same line and
+     only genuinely wide rows break. */
+  .app-header__actions .btn > span:not(.icon) { display: none; }
+  .app-header__actions .btn { min-width: var(--tap-min); padding: 0 var(--space-2); }
+}
+
+@media (max-width: 400px) {
+  /* Claw back horizontal room so seven cards keep a usable tap width. */
   .calendar-grid { gap: 4px; }
-  .calendar-day { padding: 6px 1px; }
-  .calendar-day__num { font-size: 16px; }
+  .calendar-day { padding: 6px 1px; min-height: 62px; }
+  .calendar-day__num { font-size: 15px; }
+  /* Below ~360px a cell is ~41px wide; the availability label clips inside
+     `overflow: hidden`, so show the dots alone and leave the count to the
+     day's aria-label. */
+  .calendar-day__slots { font-size: 10px; }
+  .tab { padding: 0 var(--space-2); }
+}
+
+/* Touch pointers get the full comfortable target; mice keep the denser one. */
+@media (pointer: coarse) {
+  .btn-sm, .chip { min-height: 40px; }
+  .btn-icon { width: var(--tap-min); min-width: var(--tap-min); min-height: var(--tap-min); }
 }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* Windows high-contrast: fills and shadows are dropped, so state that was
+   carried only by a tint needs a real border. */
+@media (forced-colors: active) {
+  .calendar-day--today { outline: 2px solid; }
+  .status-chip { border: 1px solid; }
+  .btn { border: 1px solid; }
 }
