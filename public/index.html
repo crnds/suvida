@@ -3,52 +3,14 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#fbf9f6">
-<title data-i18n="app_name">Suvida Piano Studio</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+Thai:wght@400;500&family=Noto+Sans+Thai:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/fontawesome.min.css">
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/solid.min.css">
-<link rel="stylesheet" href="/shared/theme.css">
+<meta http-equiv="refresh" content="0; url=/admin/">
+<title>Suvida Piano Studio</title>
+<script>location.replace('/admin/');</script>
 </head>
 <body>
-
-<!-- This page was the only one with no skip link and no #main target. -->
-<a class="skip-link" href="#main" data-i18n="a11y_skip_to_content"></a>
-
-<header class="app-header">
-  <!-- An <h1>, matching every other page, where the brand IS the heading.
-       It was a <div> here while a second <h1> below repeated the identical
-       string, so "Suvida Piano Studio" was printed twice. -->
-  <h1 class="app-header__brand" data-i18n="app_name"></h1>
-  <div class="app-header__actions">
-    <div id="lang-toggle"></div>
-  </div>
-</header>
-
-<main class="page center panel--auth" id="main">
-  <p class="text-body muted measure landing__lede" data-i18n="landing_body"></p>
-
-  <div class="stack-tight">
-    <a class="btn btn-primary btn-block" href="/admin/">
-      <i class="fa-solid fa-chalkboard-user icon" aria-hidden="true"></i><span data-i18n="landing_teacher_login"></span>
-    </a>
-    <a class="btn btn-tertiary btn-block" href="/owner/">
-      <i class="fa-solid fa-user-shield icon" aria-hidden="true"></i><span data-i18n="landing_owner_login"></span>
-    </a>
-  </div>
-</main>
-
-<script src="/shared/i18n.js"></script>
-<script src="/shared/ui.js"></script>
-<script>
-  // The only page that was English-only; it now uses the same dictionary and
-  // language toggle as the rest of the app.
-  mountLangToggle(document.getElementById('lang-toggle'));
-  document.addEventListener('i18n:changed', () => I18N.apply());
-  I18N.apply();
-</script>
+<!-- Teacher login (/admin/) is the default entry point; owner login lives
+     in that page's footer. This page only redirects, for clients that don't
+     run the head script or honor the meta refresh. -->
+<p><a href="/admin/">Continue to teacher login</a></p>
 </body>
 </html>
