@@ -7,7 +7,7 @@
 const STATE = {
   slug: null,
   displayName: '',
-  // monthStr -> { days } for every month currently rendered in the stack.
+  // monthStr -> { days, byLocation } for every month currently rendered in the stack.
   monthsData: new Map(),
   activeTab: 'book',
   locations: [],
@@ -115,8 +115,10 @@ const MAX_SLOT_DOTS = 12;
 // so a fully-booked day and a day off are indistinguishable here by design
 // (plan.md Key flows §5).
 function cellFnFor(monthStr, dateStr) {
-  const days = STATE.monthsData.get(monthStr)?.days || {};
-  const count = days[dateStr] || 0;
+  const monthData = STATE.monthsData.get(monthStr) || {};
+  const count = STATE.locationFilter === null
+    ? (monthData.days || {})[dateStr] || 0
+    : (monthData.byLocation || {})[dateStr]?.[String(STATE.locationFilter)] || 0;
   // A day with nothing on it says nothing. Repeating "no slots" across
   // twenty cells buried the handful of days that actually had availability;
   // the aria-label below still carries it for screen readers.
@@ -141,6 +143,12 @@ function cellFnFor(monthStr, dateStr) {
 // Hidden entirely with 0-1 locations — nothing meaningful to narrow down
 // for a single-location studio.
 function renderLocationFilterBar() {
+  // A location deleted server-side mid-session would otherwise leave the
+  // filter pointing at an id with no matching chip — every count still
+  // resolves correctly to 0 via cellFnFor, but no chip would show pressed.
+  if (STATE.locationFilter !== null && !STATE.locations.some((l) => l.id === STATE.locationFilter)) {
+    STATE.locationFilter = null;
+  }
   els.locationFilter.replaceChildren();
   els.locationFilter.classList.toggle('hidden', STATE.locations.length <= 1);
   if (STATE.locations.length <= 1) return;
@@ -161,20 +169,23 @@ function renderLocationFilterBar() {
   STATE.locations.forEach((loc) => els.locationFilter.appendChild(chip(I18N.localized(loc.title, loc.title_th), loc.id)));
 }
 
+// Every rendered month already has its full per-location breakdown cached
+// (loadMonthData always fetches unfiltered), so switching the filter is a
+// pure in-place repaint — no re-fetch, no scroll reset, and no re-run of
+// createMonthStack's start()/pump() machinery to race against.
 function setLocationFilter(id) {
   STATE.locationFilter = id;
   renderLocationFilterBar();
-  STATE.monthsData.clear();
-  cal.start();
+  cal.relabelAll();
 }
 
 // Fetches one month, caches it for cellFnFor, and reports whether it has any
 // bookable slot at all — the calendar stack skips any month that doesn't.
 async function loadMonthData(monthStr) {
   try {
-    const data = await Api.publicPageMonth(STATE.slug, monthStr, STATE.locationFilter);
+    const data = await Api.publicPageMonth(STATE.slug, monthStr);
     STATE.displayName = data.display_name;
-    STATE.monthsData.set(monthStr, { days: data.days || {} });
+    STATE.monthsData.set(monthStr, { days: data.days || {}, byLocation: data.days_by_location || {} });
     if (data.locations) {
       STATE.locations = data.locations;
       renderLocationFilterBar();

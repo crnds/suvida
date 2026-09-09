@@ -134,7 +134,7 @@ const Api = {
   log: (params) => apiFetch('/api/admin/log', { query: params }),
 
   // public
-  publicPageMonth: (slug, month, location_id) => apiFetch('/api/public/page', { query: { slug, month, location_id } }),
+  publicPageMonth: (slug, month) => apiFetch('/api/public/page', { query: { slug, month } }),
   publicPageDay: (slug, day, location_id) => apiFetch('/api/public/page', { query: { slug, day, location_id } }),
   publicBook: (slug, slot_id, name, phone) => apiFetch('/api/public/book', { method: 'POST', body: { slug, slot_id, name, phone } }),
   publicHistory: (slug, phone) => apiFetch('/api/public/history', { method: 'POST', body: { slug, phone } }),

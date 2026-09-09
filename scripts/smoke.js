@@ -1209,6 +1209,40 @@ async function test31() {
     selfNoop.status === 200, JSON.stringify(selfNoop.json));
 }
 
+// ── Test 32: public month endpoint's per-location breakdown ───
+// The booker calendar now filters locations client-side off one unfiltered
+// month fetch (public/b/page.js), so this endpoint must always return every
+// location's counts, keep `days` as the unfiltered total, and no longer
+// reject a location_id query on this branch (that guard moved to the `day`
+// branch only).
+
+async function test32() {
+  await resetRateLimits();
+
+  const secondLoc = await req('POST', '/api/admin/locations', { cookie: S.teacherA.cookie, body: { title: 'Location Breakdown Room' } });
+  assert('test32: second location created', secondLoc.status === 201, JSON.stringify(secondLoc.json));
+
+  const base = unixFromBangkokDateTime(bangkokDateString(futureUnix(65 * 24)), 9 * 60);
+  await addOverrideSlot(S.teacherA, base, false, S.teacherA.defaultLocationId);
+  await addOverrideSlot(S.teacherA, base + 3600, false, secondLoc.json.id);
+  const dateStr = bangkokDateString(base);
+  const monthStr = dateStr.slice(0, 7);
+
+  const page = await req('GET', '/api/public/page', { query: { slug: S.teacherA.slug, month: monthStr } });
+  assert('test32: days total includes both locations', page.json.days[dateStr] === 2, JSON.stringify(page.json.days));
+
+  const byLoc = page.json.days_by_location[dateStr];
+  assert('test32: days_by_location has one count per location for that day',
+    byLoc[String(S.teacherA.defaultLocationId)] === 1 && byLoc[String(secondLoc.json.id)] === 1,
+    JSON.stringify(byLoc));
+  assert('test32: days_by_location entries sum to the unfiltered day total',
+    Object.values(byLoc).reduce((a, b) => a + b, 0) === page.json.days[dateStr], JSON.stringify(byLoc));
+
+  const withBadParam = await req('GET', '/api/public/page', { query: { slug: S.teacherA.slug, month: monthStr, location_id: 'abc' } });
+  assert('test32: an unrecognised location_id on the month branch is ignored, not rejected',
+    withBadParam.status === 200, JSON.stringify(withBadParam.json));
+}
+
 async function main() {
   const purged = await purgePreviousRuns();
   if (purged.admins > 0) console.log(`(purged ${purged.admins} leftover smoke_* teacher(s) from previous runs)`);
@@ -1242,6 +1276,7 @@ async function main() {
   await group('Test 29 — notification watermark clamp', test29);
   await group('Test 30 — HTTP contract + tenant cascade', test30);
   await group('Test 31 — template entry edit (PATCH)', test31);
+  await group('Test 32 — public month location breakdown', test32);
 
   const skipped = results.filter((r) => r.skipped);
   const graded = results.filter((r) => !r.skipped);

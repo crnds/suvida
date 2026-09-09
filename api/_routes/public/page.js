@@ -68,29 +68,36 @@ export async function getPage(req, res) {
       return;
     }
     const { start, end } = bangkokMonthBounds(req.query.month);
-    const locationId = optionalIdParam(req.query?.location_id);
-    if (locationId === INVALID) {
-      badRequest(res);
-      return;
-    }
+    // Filtering here used to be done server-side per location_id, but the
+    // booker's month calendar now caches one unfiltered fetch per month and
+    // filters client-side (public/b/page.js) — so this branch always
+    // returns every location's breakdown and ignores any location_id query.
     const result = await db.execute({
-      sql: `SELECT s.start_unix
+      sql: `SELECT s.start_unix, s.location_id
               FROM slots s
              WHERE s.admin_id = ? AND s.start_unix >= ? AND s.start_unix < ?
-               AND ${BOOKABLE_PREDICATE}
-               AND (? IS NULL OR s.location_id = ?)`,
-      args: [adminId, start, end, now, locationId, locationId],
+               AND ${BOOKABLE_PREDICATE}`,
+      args: [adminId, start, end, now],
     });
     const days = {};
+    const daysByLocation = {};
     for (const r of result.rows) {
       const dateStr = bangkokDateString(r.start_unix);
       days[dateStr] = (days[dateStr] ?? 0) + 1;
+      const locKey = String(r.location_id);
+      const perLoc = (daysByLocation[dateStr] ??= {});
+      perLoc[locKey] = (perLoc[locKey] ?? 0) + 1;
     }
     const locations = await db.execute({
       sql: 'SELECT id, title, title_th FROM locations WHERE admin_id = ? ORDER BY id',
       args: [adminId],
     });
-    res.status(200).json({ display_name: admin.rows[0].display_name, days, locations: locations.rows });
+    res.status(200).json({
+      display_name: admin.rows[0].display_name,
+      days,
+      days_by_location: daysByLocation,
+      locations: locations.rows,
+    });
     return;
   }
 
