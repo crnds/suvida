@@ -39,9 +39,8 @@ const DICT = {
     month_5: 'พฤษภาคม', month_6: 'มิถุนายน', month_7: 'กรกฎาคม', month_8: 'สิงหาคม',
     month_9: 'กันยายน', month_10: 'ตุลาคม', month_11: 'พฤศจิกายน', month_12: 'ธันวาคม',
 
-    calendar_prev: 'เดือนก่อนหน้า',
-    calendar_next: 'เดือนถัดไป',
     calendar_today: 'วันนี้',
+    calendar_stack_end: 'ไม่พบคิวว่างเพิ่มเติมในช่วงนี้',
 
     common_loading: 'กำลังโหลด...',
     common_error_generic: 'เกิดข้อผิดพลาด ลองใหม่อีกครั้ง',
@@ -74,8 +73,6 @@ const DICT = {
     booker_tab_book: 'จองเวลาเรียน',
     booker_tab_history: 'ประวัติการจอง',
     booker_pick_day: 'เลือกวันที่ต้องการเรียน',
-    booker_no_slots_month: 'เดือนนี้ยังไม่มีคิวว่าง',
-    booker_no_slots_month_hint: 'ลองดูเดือนถัดไป หรือสอบถามครูผู้สอนโดยตรง',
     booker_day_slots_title: 'เวลาว่างวันที่ {date}',
     booker_no_slots_day: 'วันนี้ไม่มีคิวว่างแล้ว',
     booker_slots_count: 'ว่าง {count} คิว',
@@ -301,9 +298,8 @@ const DICT = {
     month_5: 'May', month_6: 'June', month_7: 'July', month_8: 'August',
     month_9: 'September', month_10: 'October', month_11: 'November', month_12: 'December',
 
-    calendar_prev: 'Previous month',
-    calendar_next: 'Next month',
     calendar_today: 'Today',
+    calendar_stack_end: 'No further openings found for now.',
 
     common_loading: 'Loading…',
     common_error_generic: 'Something went wrong. Please try again.',
@@ -335,8 +331,6 @@ const DICT = {
     booker_tab_book: 'Book a lesson',
     booker_tab_history: 'My bookings',
     booker_pick_day: 'Pick a day for your lesson',
-    booker_no_slots_month: 'No open slots this month',
-    booker_no_slots_month_hint: 'Try the next month, or ask your teacher directly.',
     booker_day_slots_title: 'Open times on {date}',
     booker_no_slots_day: 'No open slots left today',
     booker_slots_count: '{count} open',

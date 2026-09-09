@@ -8,8 +8,9 @@ const STATE = {
   activeTab: 'schedule',
   template: [],
   weeks: [],
-  month: bangkokMonthString(),
-  monthDays: {},
+  // monthStr -> { total, free, booked, blocked } per day, for every month
+  // currently rendered in the stack.
+  monthsData: new Map(),
   pollTimer: null,
   sessionUnreadIds: new Set(),
   logEvents: [],
@@ -21,11 +22,6 @@ const STATE = {
   unreadCount: 0,
   // The open day panel, so nested modals can refresh it after they close.
   dayPanel: null,
-  // Rapid month paging fires overlapping requests; only the newest may paint.
-  monthToken: 0,
-  // See b/page.js: held so a language toggle repaints a failed month's error
-  // instead of replacing it with an empty-looking calendar.
-  monthError: null,
   // Overlapping log loads (filter changes, "Load more") must not merge.
   logToken: 0,
 };
@@ -110,8 +106,7 @@ document.addEventListener('i18n:changed', () => {
   populateLogFilterSelects();
   renderTemplate();
   renderWeeks();
-  if (STATE.monthError) renderMonthError(STATE.monthError);
-  else renderCalendar();
+  adminCal.relabelAll();
   renderLog();
   renderLocations();
   populateLocationSelect(els.tfLocation);
@@ -206,7 +201,7 @@ async function afterLogin(opts) {
 
 const tabs = UI.wireTabs(els.tabBtns, els.tabSections, (tab) => {
   STATE.activeTab = tab;
-  if (tab === 'calendar' && !els.adminCalendar.dataset.loaded) loadCalendarMonth();
+  if (tab === 'calendar' && !els.adminCalendar.dataset.loaded) adminCal.start();
   if (tab === 'notifications') loadNotifications();
   if (tab === 'log' && STATE.logEvents.length === 0) loadLog(true);
 });
@@ -651,13 +646,15 @@ function renderLocationFilterBar() {
 function setCalendarLocationFilter(id) {
   STATE.calendarLocationFilter = id;
   renderLocationFilterBar();
-  loadCalendarMonth();
+  STATE.monthsData.clear();
+  adminCal.start();
 }
 
 // ── Calendar tab ─────────────────────────────────────────────
 
-const adminCal = createMonthCalendar(els.adminCalendar, {
-  onMonthChange: (monthStr) => { STATE.month = monthStr; loadCalendarMonth(); },
+const adminCal = createMonthStack(els.adminCalendar, {
+  loadMonth: loadMonthData,
+  cellFn: cellFnFor,
   onDayClick: (dateStr) => openDayPanel(dateStr),
 });
 
@@ -668,102 +665,72 @@ const MAX_SLOT_DOTS = 12;
 
 // Unlike the booker, admin sees every slot, so all three states are real:
 // free (some bookable), full (slots exist, none bookable), closed (no slots).
-function renderCalendar() {
-  adminCal.render(STATE.month, (dateStr) => {
-    const day = STATE.monthDays[dateStr];
-    const wrap = document.createElement('div');
-    wrap.className = 'calendar-day__info';
+function cellFnFor(monthStr, dateStr) {
+  const day = STATE.monthsData.get(monthStr)?.days?.[dateStr];
+  const wrap = document.createElement('div');
+  wrap.className = 'calendar-day__info';
 
-    const counts = document.createElement('div');
-    counts.className = 'calendar-day__counts';
-    const labels = [];
-    const addCount = (kind, n) => {
-      if (!n) return;
-      const text = I18N.t(`calendar_count_${kind}`, { n });
-      const span = document.createElement('span');
-      span.className = `calendar-day__count calendar-day__count--${kind}`;
-      span.textContent = text;
-      counts.appendChild(span);
-      labels.push(text);
+  const counts = document.createElement('div');
+  counts.className = 'calendar-day__counts';
+  const labels = [];
+  const addCount = (kind, n) => {
+    if (!n) return;
+    const text = I18N.t(`calendar_count_${kind}`, { n });
+    const span = document.createElement('span');
+    span.className = `calendar-day__count calendar-day__count--${kind}`;
+    span.textContent = text;
+    counts.appendChild(span);
+    labels.push(text);
+  };
+  if (day) {
+    addCount('free', day.free);
+    addCount('booked', day.booked);
+    addCount('blocked', day.blocked);
+  }
+  wrap.appendChild(counts);
+
+  // One dot per slot (free first, then booked, then blocked), capped so a
+  // fully-booked day can't overflow the card.
+  if (day && day.total > 0) {
+    const dots = document.createElement('div');
+    dots.className = 'calendar-day__dots';
+    dots.setAttribute('aria-hidden', 'true');
+    let remaining = MAX_SLOT_DOTS;
+    const addDots = (kind, n) => {
+      const show = Math.min(n || 0, remaining);
+      for (let i = 0; i < show; i++) {
+        const dot = document.createElement('span');
+        dot.className = `calendar-day__dot calendar-day__dot--${kind}`;
+        dots.appendChild(dot);
+      }
+      remaining -= show;
     };
-    if (day) {
-      addCount('free', day.free);
-      addCount('booked', day.booked);
-      addCount('blocked', day.blocked);
-    }
-    wrap.appendChild(counts);
+    addDots('free', day.free);
+    addDots('booked', day.booked);
+    addDots('blocked', day.blocked);
+    wrap.appendChild(dots);
+  }
 
-    // One dot per slot (free first, then booked, then blocked), capped so a
-    // fully-booked day can't overflow the card.
-    if (day && day.total > 0) {
-      const dots = document.createElement('div');
-      dots.className = 'calendar-day__dots';
-      dots.setAttribute('aria-hidden', 'true');
-      let remaining = MAX_SLOT_DOTS;
-      const addDots = (kind, n) => {
-        const show = Math.min(n || 0, remaining);
-        for (let i = 0; i < show; i++) {
-          const dot = document.createElement('span');
-          dot.className = `calendar-day__dot calendar-day__dot--${kind}`;
-          dots.appendChild(dot);
-        }
-        remaining -= show;
-      };
-      addDots('free', day.free);
-      addDots('booked', day.booked);
-      addDots('blocked', day.blocked);
-      wrap.appendChild(dots);
-    }
-
-    // Blocked-only days are closed, not full — "full" means booked out.
-    const empty = !day || day.total === 0;
-    let state = 'closed';
-    if (!empty && day.free) state = 'free';
-    else if (!empty && day.booked) state = 'full';
-    return { node: wrap, state, disabled: empty, aria: labels.join(', ') };
-  });
+  // Blocked-only days are closed, not full — "full" means booked out.
+  const empty = !day || day.total === 0;
+  let state = 'closed';
+  if (!empty && day.free) state = 'free';
+  else if (!empty && day.booked) state = 'full';
+  return { node: wrap, state, disabled: empty, aria: labels.join(', ') };
 }
 
-// quiet=true refreshes without dropping the month back to a spinner — used
-// after a day-panel action, where the calendar is already on screen behind
-// the sheet.
-async function loadCalendarMonth(quiet) {
-  const token = ++STATE.monthToken;
-  if (!quiet) {
-    els.adminCalendar.setAttribute('aria-busy', 'true');
-    adminCal.renderMessage(STATE.month, UI.loadingRow(), { keepPendingFocus: true });
-  }
-  try {
-    const data = await Api.adminSlotsMonth(STATE.month, STATE.calendarLocationFilter);
-    if (token !== STATE.monthToken) return;
-    STATE.monthDays = data.days || {};
-    // Flagged here, not in renderCalendar — the i18n listener re-renders on every
-    // language toggle, so setting it there marked the tab loaded before any fetch
-    // and setTab('calendar') then skipped loading forever.
-    els.adminCalendar.dataset.loaded = '1';
-    STATE.monthError = null;
-    renderCalendar();
-  } catch (err) {
-    if (token !== STATE.monthToken) return;
-    // Keep the month nav so a failed month is not a dead end.
-    STATE.monthError = err;
-    renderMonthError(err);
-  } finally {
-    if (token === STATE.monthToken) els.adminCalendar.removeAttribute('aria-busy');
-  }
-}
-
-// Split out of loadCalendarMonth's catch so the language toggle can repaint
-// it — see the i18n:changed listener.
-function renderMonthError(err) {
-  const retry = UI.button({
-    kind: 'secondary', icon: 'rotate-right', label: I18N.t('common_retry'),
-    onClick: () => loadCalendarMonth(),
-  });
-  adminCal.renderMessage(STATE.month, UI.el('div', { class: 'stack' }, [
-    UI.banner(messageForError(err), 'error'),
-    UI.el('div', { class: 'form-row' }, [retry]),
-  ]));
+// Fetches one month, caches it for cellFnFor, and reports whether it has any
+// slot at all (free, booked, or blocked) — the calendar stack skips any
+// month that doesn't.
+async function loadMonthData(monthStr) {
+  const data = await Api.adminSlotsMonth(monthStr, STATE.calendarLocationFilter);
+  STATE.monthsData.set(monthStr, { days: data.days || {} });
+  // Flagged here, not in cellFnFor — the i18n listener re-renders on every
+  // language toggle, so setting it there marked the tab loaded before any fetch
+  // and setTab('calendar') then skipped loading forever.
+  els.adminCalendar.dataset.loaded = '1';
+  const total = Object.values(data.days || {}).reduce((sum, d) => sum + (d?.total || 0), 0);
+  return { hasSlots: total > 0 };
 }
 
 // ── Day panel ──────────────────────────────────────────────
@@ -813,7 +780,7 @@ async function refreshDayPanel(body, dateStr) {
 async function refreshAfterDayAction() {
   const panel = STATE.dayPanel;
   if (panel && panel.handle.isOpen()) await refreshDayPanel(panel.body, panel.dateStr);
-  loadCalendarMonth(true);
+  if (panel) adminCal.refreshMonth(panel.dateStr.slice(0, 7));
 }
 
 function renderDayPanel(body, dateStr, slots) {
@@ -1210,8 +1177,7 @@ function renderNotifications(notifications) {
       label: I18N.t('notif_go_to_day'),
       onClick: () => {
         setTab('calendar');
-        STATE.month = n.day.slice(0, 7);
-        loadCalendarMonth().then(() => openDayPanel(n.day));
+        adminCal.revealMonth(n.day.slice(0, 7)).then(() => openDayPanel(n.day));
       },
     });
 
@@ -1430,7 +1396,8 @@ els.settingsResetBtn.addEventListener('click', async () => {
       STATE.calendarLocationFilter = null;
       renderSettings();
       await Promise.all([loadSchedule(), loadLocations()]);
-      loadCalendarMonth();
+      STATE.monthsData.clear();
+      adminCal.start();
       UI.toast('success', I18N.t('settings_reset_done'));
     } catch (err) {
       UI.toastError(err);

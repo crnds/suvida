@@ -367,8 +367,8 @@ async function runFlows() {
     });
     await page.goto(`${BASE}/b/${SLUG}`, { waitUntil: 'domcontentloaded' });
     await wait(1500);
-    check('booker: month nav survives a failed load',
-      (await page.$$('.calendar-nav .btn')).length === 2);
+    check('booker: a failed month shows an error banner, not a dead calendar',
+      !!(await page.$('#calendar .banner--error')));
     const retry = await page.$('#calendar .btn-secondary');
     check('booker: a retry button is offered', !!retry);
     if (retry) {
@@ -793,13 +793,16 @@ async function runFlows() {
     check('booker: calendar grid has role="grid"',
       await page.$eval('.calendar-grid', (n) => n.getAttribute('role') === 'grid'));
 
-    const rowCellCounts = await page.$$eval('.calendar-grid [role="row"]',
-      (rows) => rows.map((r) => r.querySelectorAll('[role="gridcell"], [role="columnheader"]').length));
+    // Scoped to the first stacked month's grid: with the calendar stack now
+    // rendering more than one month at once, an unscoped query would count
+    // rows/headers across every rendered month.
+    const rowCellCounts = await page.$eval('.calendar-grid', (grid) =>
+      [...grid.querySelectorAll('[role="row"]')].map((r) => r.querySelectorAll('[role="gridcell"], [role="columnheader"]').length));
     check('booker: every grid row exposes exactly 7 cells',
       rowCellCounts.length > 0 && rowCellCounts.every((n) => n === 7), rowCellCounts.join(','));
 
-    const headerRoles = await page.$$eval('.calendar-weekday',
-      (els) => els.map((e) => e.getAttribute('role')));
+    const headerRoles = await page.$eval('.calendar-grid',
+      (grid) => [...grid.querySelectorAll('.calendar-weekday')].map((e) => e.getAttribute('role')));
     check('booker: weekday headers are columnheaders, not aria-hidden',
       headerRoles.length === 7 && headerRoles.every((r) => r === 'columnheader'), headerRoles.join(','));
 
@@ -861,10 +864,6 @@ async function runFlows() {
     await page.goto(`${BASE}/b/${SLUG}`, { waitUntil: 'networkidle2' });
     await page.waitForSelector(OPEN_DAY);
 
-    const anchor = await page.evaluate(() => {
-      const m = document.querySelector('.calendar-nav__label').textContent;
-      return m;
-    });
     const [, monthNum] = await page.$eval('.calendar-day[data-date]', (n) => n.dataset.date.split('-'));
     const year = await page.$eval('.calendar-day[data-date]', (n) => n.dataset.date.split('-')[0]);
     const day15 = `${year}-${monthNum}-15`;
@@ -904,12 +903,14 @@ async function runFlows() {
     await page.goto(`${BASE}/b/${SLUG}`, { waitUntil: 'networkidle2' });
     await page.waitForSelector(OPEN_DAY);
 
-    const waitForLabelChange = async (prevLabel) => {
+    const waitForDateChange = async (prevDate) => {
       await page.waitForFunction(
-        (prev) => document.querySelector('.calendar-nav__label')?.textContent !== prev,
-        { timeout: 8000 }, prevLabel,
+        (prev) => {
+          const d = document.activeElement?.closest?.('.calendar-day')?.dataset.date;
+          return d && d !== prev;
+        },
+        { timeout: 8000 }, prevDate,
       );
-      await page.waitForFunction(() => !!document.activeElement?.closest?.('.calendar-day'), { timeout: 8000 });
       return page.evaluate(() => document.activeElement.closest('.calendar-day').dataset.date);
     };
 
@@ -917,30 +918,34 @@ async function runFlows() {
     // tabindex="0" cell is a tab stop, not automatically focused), and the
     // grid's keydown listener only fires for events targeting inside the
     // grid — so this must explicitly focus the cell before sending the key.
-    let label = await page.$eval('.calendar-nav__label', (n) => n.textContent);
     const from = await page.$eval('.calendar-day[tabindex="0"]', (el) => { el.focus(); return el.dataset.date; });
     await page.keyboard.press('PageDown');
-    let landed = await waitForLabelChange(label);
+    let landed = await waitForDateChange(from);
     let expected = shiftMonthISO(from, 1);
     check('booker: PageDown lands on the expected day in the next month',
       landed === expected, `${from} -> ${landed} (expected ${expected})`);
 
     // PageUp, from wherever PageDown just landed
-    label = await page.$eval('.calendar-nav__label', (n) => n.textContent);
     const beforeUp = landed;
     await page.keyboard.press('PageUp');
-    landed = await waitForLabelChange(label);
+    landed = await waitForDateChange(beforeUp);
     expected = shiftMonthISO(beforeUp, -1);
     check('booker: PageUp lands on the expected day in the previous month',
       landed === expected, `${beforeUp} -> ${landed} (expected ${expected})`);
 
     // Arrow-key crossing: ArrowRight off the last day of the month must
     // land on the 1st of the next month (hand-off §5.1's "→ on the 31st").
-    label = await page.$eval('.calendar-nav__label', (n) => n.textContent);
-    const lastDay = await page.$$eval('.calendar-day', (els) => els[els.length - 1].dataset.date);
+    // Scoped to the first (anchor) month's own last day: the stack may have
+    // already auto-loaded further months into view, and grabbing the very
+    // last cell in the whole document would test crossing out of whichever
+    // month happened to load last, not a single well-defined month boundary.
+    const lastDay = await page.$eval('.calendar-grid', (grid) => {
+      const days = grid.querySelectorAll('.calendar-day');
+      return days[days.length - 1].dataset.date;
+    });
     await page.evaluate((d) => document.querySelector(`.calendar-day[data-date="${d}"]`)?.focus(), lastDay);
     await page.keyboard.press('ArrowRight');
-    landed = await waitForLabelChange(label);
+    landed = await waitForDateChange(lastDay);
     expected = shiftISO(lastDay, 1);
     check('booker: ArrowRight off the last day of the month lands on the 1st of the next month',
       landed === expected, `${lastDay} -> ${landed} (expected ${expected})`);
@@ -988,21 +993,21 @@ async function runFlows() {
 
     await page.$eval('.calendar-day[tabindex="0"]', (el) => el.focus());
     const before = await page.evaluate(() => document.activeElement.dataset.date);
-    const prevLabel = await page.$eval('.calendar-nav__label', (n) => n.textContent);
+    const prevAria = await page.evaluate(() => document.activeElement.getAttribute('aria-label'));
     // A real click on #lang-toggle would move DOM focus to the toggle
     // button itself (standard browser click-then-focus ordering), which
     // would make this test conflate "a different element legitimately has
-    // focus" with "render() failed to preserve a day cell's focus" — drive
-    // the same code path flow 2 uses instead. Toggle to whichever language
-    // isn't already active — flow 2 earlier in the suite switches the site
-    // to 'en' and nothing resets it, so hardcoding 'en' here would be a
-    // no-op (same language in, same language out) and never exercise the
-    // re-render this flow exists to guard.
+    // focus" with "relabelAll() failed to preserve a day cell's focus" —
+    // drive the same code path flow 2 uses instead. Toggle to whichever
+    // language isn't already active — flow 2 earlier in the suite switches
+    // the site to 'en' and nothing resets it, so hardcoding 'en' here would
+    // be a no-op (same language in, same language out) and never exercise
+    // the relabel this flow exists to guard.
     const nextLang = (await page.evaluate(() => I18N.lang)) === 'en' ? 'th' : 'en';
     await page.evaluate((l) => I18N.setLang(l), nextLang);
     await page.waitForFunction(
-      (prev) => document.querySelector('.calendar-nav__label')?.textContent !== prev,
-      { timeout: 8000 }, prevLabel,
+      (prev) => document.activeElement?.getAttribute?.('aria-label') !== prev,
+      { timeout: 8000 }, prevAria,
     );
     const after = await page.evaluate(() => document.activeElement?.dataset?.date);
     check('booker: focus survives a language toggle', after === before, `${before} -> ${after}`);
@@ -1035,17 +1040,18 @@ async function runFlows() {
     await page.goto(`${BASE}/admin/`, { waitUntil: 'networkidle2' });
     await page.waitForSelector('.calendar-day', { timeout: 8000 });
 
-    const startLabel = await page.$eval('.calendar-nav__label', (n) => n.textContent);
     // Explicitly focus first — nothing has DOM focus on a freshly loaded
     // page, and the grid's keydown listener only fires for events targeting
     // inside the grid (see flow 19's comment).
     const from = await page.$eval('.calendar-day[tabindex="0"]', (el) => { el.focus(); return el.dataset.date; });
     await page.keyboard.press('PageDown');
     await page.waitForFunction(
-      (prev) => document.querySelector('.calendar-nav__label')?.textContent !== prev,
-      { timeout: 8000 }, startLabel,
+      (prev) => {
+        const d = document.activeElement?.closest?.('.calendar-day')?.dataset.date;
+        return d && d !== prev;
+      },
+      { timeout: 8000 }, from,
     );
-    await page.waitForFunction(() => !!document.activeElement?.closest?.('.calendar-day'), { timeout: 8000 });
     const landedDate = await page.evaluate(() => document.activeElement.closest('.calendar-day').dataset.date);
     const expected = shiftMonthISO(from, 1);
     check('admin: PageDown lands on the expected day in the next month',
@@ -1205,6 +1211,135 @@ async function runFlows() {
     check('admin: throwaway week-grid teacher(s) cleaned up',
       removed === stale.length && stale.length >= 1,
       `removed ${removed}/${stale.length}`);
+  });
+
+  // 25. A teacher with no template and no activated weeks must never render
+  // a single day cell, must stop scanning once the lookahead cap is hit
+  // (not hammer the API forever), and must show an end-of-stack message
+  // instead of a blank calendar.
+  await flow(25, async () => {
+    const uname = `qa_emptycal_${Date.now()}`;
+    const password = 'emptycalpass1';
+    const ownerTok = await sessionCookie('/api/owner/login', { username: OWNER, password: OWNER_PASSWORD, remember: true });
+    const created = await fetch(BASE + '/api/owner/admins', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: `suvida_session=${ownerTok}` },
+      body: JSON.stringify({ username: uname, password, display_name: 'QA Empty Calendar' }),
+    });
+    const admin = await created.json();
+    check('booker: throwaway teacher created for empty-calendar flow', created.status === 201, JSON.stringify(admin));
+
+    const page = await newPage();
+    let requestCount = 0;
+    await page.setRequestInterception(true);
+    page.on('request', (req) => {
+      if (req.url().includes('/api/public/page')) requestCount++;
+      req.continue();
+    });
+    await page.goto(`${BASE}/b/${admin.slug}`, { waitUntil: 'networkidle2' });
+    await page.waitForFunction(() => !!document.querySelector('#calendar .empty-state'), { timeout: 20000 });
+
+    check('booker: no day cell ever renders for a teacher with nothing scheduled',
+      (await page.$$('.calendar-day')).length === 0);
+    const endText = await page.$eval('#calendar .empty-state', (n) => n.textContent.trim());
+    check('booker: an end-of-stack message is shown instead of a blank calendar', endText.length > 0, endText);
+
+    const countAtCap = requestCount;
+    await wait(1500);
+    check('booker: the calendar stops requesting months once the cap is hit',
+      requestCount === countAtCap, `${countAtCap} -> ${requestCount}`);
+
+    await page.close();
+
+    const del = await fetch(`${BASE}/api/owner/admins/${admin.id}`, {
+      method: 'DELETE',
+      headers: { Cookie: `suvida_session=${ownerTok}` },
+    });
+    check('booker: throwaway empty-calendar teacher cleaned up', del.status === 200);
+  });
+
+  // 26. Admin's notification "go to day" must grow the stack through
+  // intervening (empty) months and land on the booked day, even though that
+  // month isn't part of the initially rendered stack.
+  await flow(26, async () => {
+    const uname = `qa_notifjump_${Date.now()}`;
+    const password = 'notifjumppass1';
+    const ownerTok = await sessionCookie('/api/owner/login', { username: OWNER, password: OWNER_PASSWORD, remember: true });
+    const created = await fetch(BASE + '/api/owner/admins', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: `suvida_session=${ownerTok}` },
+      body: JSON.stringify({ username: uname, password, display_name: 'QA Notif Jump' }),
+    });
+    const admin = await created.json();
+    check('admin: throwaway teacher created for notification-jump flow', created.status === 201, JSON.stringify(admin));
+
+    const adminTok = await sessionCookie('/api/admin/login', { username: uname, password, remember: true });
+    const locRes = await fetch(BASE + '/api/admin/locations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: `suvida_session=${adminTok}` },
+      body: JSON.stringify({ title: 'Notif Room' }),
+    });
+    const loc = await locRes.json();
+    await fetch(BASE + '/api/admin/template', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: `suvida_session=${adminTok}` },
+      body: JSON.stringify({ weekday: 2, start_minutes: 540, location_id: loc.id }),
+    });
+
+    // Mid-month and three months out, so the activated week can never span a
+    // month boundary and the notification jump has real intervening months
+    // (all empty) to grow through before it lands.
+    const future = new Date();
+    future.setUTCDate(15);
+    future.setUTCMonth(future.getUTCMonth() + 3);
+    const futureDateStr = future.toISOString().slice(0, 10);
+    await fetch(BASE + `/api/admin/weeks/${futureDateStr}/activate`, {
+      method: 'POST',
+      headers: { Cookie: `suvida_session=${adminTok}` },
+    });
+
+    const monthRes = await fetch(`${BASE}/api/public/page?slug=${admin.slug}&month=${futureDateStr.slice(0, 7)}`);
+    const monthData = await monthRes.json();
+    const bookedDay = Object.keys(monthData.days || {})[0];
+    check('admin: the activated future week produced a bookable day', !!bookedDay, JSON.stringify(monthData.days));
+
+    const dayRes = await fetch(`${BASE}/api/public/page?slug=${admin.slug}&day=${bookedDay}`);
+    const dayData = await dayRes.json();
+    const slot = (dayData.slots || [])[0];
+    check('admin: the booked day has a slot to book', !!slot);
+
+    const bookRes = await fetch(BASE + '/api/public/book', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slug: admin.slug, slot_id: slot.id, name: 'QA Notif Student', phone: '0812345678' }),
+    });
+    check('admin: the booking that generates the notification succeeded', bookRes.status === 201);
+
+    const page = await newPage({ width: 1100 });
+    await page.setCookie({ name: 'suvida_session', value: adminTok, domain: new URL(BASE).hostname, path: '/' });
+    await page.goto(`${BASE}/admin/`, { waitUntil: 'networkidle2' });
+    await page.click('#tab-btn-notifications');
+    // Scoped to the notifications list: the schedule tab's weeks/locations
+    // lists also render `.list-row .btn` markup (just hidden), and an
+    // unscoped selector would match one of those instead.
+    await page.waitForSelector('#notifications-list .list-row .btn', { timeout: 8000 });
+    await page.click('#notifications-list .list-row .btn');
+
+    await page.waitForSelector(`.calendar-day[data-date="${bookedDay}"]`, { timeout: 20000 });
+    check('admin: the notification jump grows the stack through the intervening months', true);
+
+    await page.waitForFunction(() => !!document.querySelector('.modal-overlay:not(.hidden) strong'), { timeout: 8000 });
+    const panelText = await page.$eval('.modal-overlay:not(.hidden)', (n) => n.textContent);
+    check('admin: the jumped-to day panel shows the booking that generated the notification',
+      panelText.includes('QA Notif Student'), panelText.slice(0, 200));
+
+    await page.close();
+
+    const del = await fetch(`${BASE}/api/owner/admins/${admin.id}`, {
+      method: 'DELETE',
+      headers: { Cookie: `suvida_session=${ownerTok}` },
+    });
+    check('admin: throwaway notification-jump teacher cleaned up', del.status === 200);
   });
 
 }

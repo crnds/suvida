@@ -7,17 +7,12 @@
 const STATE = {
   slug: null,
   displayName: '',
-  month: bangkokMonthString(),
-  monthDays: {},
+  // monthStr -> { days } for every month currently rendered in the stack.
+  monthsData: new Map(),
   activeTab: 'book',
   locations: [],
   locationFilter: null,
   openDay: null,
-  // Rapid month paging fires overlapping requests; only the newest may paint.
-  monthToken: 0,
-  // The last month load's failure, if any. Held so a language toggle can
-  // repaint the error rather than replacing it with a false "no availability".
-  monthError: null,
   // Lets a language toggle re-render whatever modal is currently open,
   // instead of leaving it stranded in the previous language.
   reopenModal: null,
@@ -48,14 +43,7 @@ const els = {
 
 mountLangToggle(document.getElementById('lang-toggle'));
 document.addEventListener('i18n:changed', () => {
-  // renderCalendar() unconditionally would wipe a failed month's error banner
-  // and Retry button, and — because STATE.monthDays is still {} after a
-  // failure — replace them with "No open slots this month. Try the next
-  // month, or ask your teacher directly." A student whose connection dropped
-  // and who then toggled the language was told, falsely and with authority,
-  // that the teacher has no availability.
-  if (STATE.monthError) renderMonthError(STATE.monthError);
-  else renderCalendar();
+  cal.relabelAll();
   renderLocalBookings();
   renderLocationFilterBar();
   els.locationFilter.setAttribute('aria-label', I18N.t('booker_location_filter_label'));
@@ -115,8 +103,9 @@ function setTab(tab) { tabs.select(tab); }
 
 // ── Month calendar ─────────────────────────────────────────
 
-const cal = createMonthCalendar(els.calendar, {
-  onMonthChange: (monthStr) => { STATE.month = monthStr; loadMonth(); },
+const cal = createMonthStack(els.calendar, {
+  loadMonth: loadMonthData,
+  cellFn: cellFnFor,
   onDayClick: (dateStr) => openDaySlotsModal(dateStr),
 });
 
@@ -125,42 +114,28 @@ const MAX_SLOT_DOTS = 12;
 // Two states only: the month endpoint returns bookable slots and nothing else,
 // so a fully-booked day and a day off are indistinguishable here by design
 // (plan.md Key flows §5).
-function renderCalendar() {
-  const total = Object.values(STATE.monthDays).reduce((sum, n) => sum + (n || 0), 0);
-
-  cal.render(STATE.month, (dateStr) => {
-    const count = STATE.monthDays[dateStr] || 0;
-    // A day with nothing on it says nothing. Repeating "no slots" across
-    // twenty cells buried the handful of days that actually had availability;
-    // the aria-label below still carries it for screen readers.
-    if (count === 0) {
-      return { state: 'closed', disabled: true, aria: I18N.t('booker_day_none') };
-    }
-
-    const label = I18N.t('booker_slots_count', { count });
-    const wrap = UI.el('div', { class: 'calendar-day__info' }, [
-      UI.el('div', { class: 'calendar-day__slots', text: label }),
-    ]);
-
-    const dots = UI.el('div', { class: 'calendar-day__dots', attrs: { 'aria-hidden': 'true' } });
-    for (let i = 0; i < Math.min(count, MAX_SLOT_DOTS); i++) {
-      dots.appendChild(UI.el('span', { class: 'calendar-day__dot' }));
-    }
-    wrap.appendChild(dots);
-
-    return { node: wrap, state: 'free', disabled: false, aria: label };
-  });
-
-  // The month-level empty state: booker_no_slots_month has always been
-  // translated and was never rendered, so an empty month showed thirty grey
-  // cards and no explanation.
-  if (total === 0) {
-    els.calendar.appendChild(UI.emptyState({
-      icon: 'calendar-xmark',
-      title: I18N.t('booker_no_slots_month'),
-      text: I18N.t('booker_no_slots_month_hint'),
-    }));
+function cellFnFor(monthStr, dateStr) {
+  const days = STATE.monthsData.get(monthStr)?.days || {};
+  const count = days[dateStr] || 0;
+  // A day with nothing on it says nothing. Repeating "no slots" across
+  // twenty cells buried the handful of days that actually had availability;
+  // the aria-label below still carries it for screen readers.
+  if (count === 0) {
+    return { state: 'closed', disabled: true, aria: I18N.t('booker_day_none') };
   }
+
+  const label = I18N.t('booker_slots_count', { count });
+  const wrap = UI.el('div', { class: 'calendar-day__info' }, [
+    UI.el('div', { class: 'calendar-day__slots', text: label }),
+  ]);
+
+  const dots = UI.el('div', { class: 'calendar-day__dots', attrs: { 'aria-hidden': 'true' } });
+  for (let i = 0; i < Math.min(count, MAX_SLOT_DOTS); i++) {
+    dots.appendChild(UI.el('span', { class: 'calendar-day__dot' }));
+  }
+  wrap.appendChild(dots);
+
+  return { node: wrap, state: 'free', disabled: false, aria: label };
 }
 
 // Hidden entirely with 0-1 locations — nothing meaningful to narrow down
@@ -189,23 +164,17 @@ function renderLocationFilterBar() {
 function setLocationFilter(id) {
   STATE.locationFilter = id;
   renderLocationFilterBar();
-  loadMonth();
+  STATE.monthsData.clear();
+  cal.start();
 }
 
-// quiet=true refreshes without flashing the calendar back to a spinner —
-// used after booking or cancelling, where the month is already on screen.
-async function loadMonth(quiet) {
-  const token = ++STATE.monthToken;
-  if (!quiet) {
-    els.calendar.setAttribute('aria-busy', 'true');
-    cal.renderMessage(STATE.month, UI.loadingRow(), { keepPendingFocus: true });
-  }
+// Fetches one month, caches it for cellFnFor, and reports whether it has any
+// bookable slot at all — the calendar stack skips any month that doesn't.
+async function loadMonthData(monthStr) {
   try {
-    const data = await Api.publicPageMonth(STATE.slug, STATE.month, STATE.locationFilter);
-    // A slower earlier request must not overwrite a newer month.
-    if (token !== STATE.monthToken) return;
+    const data = await Api.publicPageMonth(STATE.slug, monthStr, STATE.locationFilter);
     STATE.displayName = data.display_name;
-    STATE.monthDays = data.days || {};
+    STATE.monthsData.set(monthStr, { days: data.days || {} });
     if (data.locations) {
       STATE.locations = data.locations;
       renderLocationFilterBar();
@@ -214,32 +183,12 @@ async function loadMonth(quiet) {
       els.brand.textContent = STATE.displayName;
       document.title = `${STATE.displayName} — ${I18N.t('app_name')}`;
     }
-    STATE.monthError = null;
-    renderCalendar();
+    const total = Object.values(data.days || {}).reduce((sum, n) => sum + (n || 0), 0);
+    return { hasSlots: total > 0 };
   } catch (err) {
-    if (token !== STATE.monthToken) return;
-    if (err.status === 404) { showNotFound(); return; }
-    STATE.monthError = err;
-    renderMonthError(err);
-    UI.announce(UI.messageForError(err), true);
-  } finally {
-    if (token === STATE.monthToken) els.calendar.removeAttribute('aria-busy');
+    if (err.status === 404) { showNotFound(); }
+    throw err;
   }
-}
-
-// Keeps the month nav and offers a way out, rather than clearing the
-// container and stranding the student on a dead month. Split out of
-// loadMonth's catch so the language toggle can repaint it (see i18n:changed).
-function renderMonthError(err) {
-  const retry = UI.button({
-    kind: 'secondary', icon: 'rotate-right',
-    label: I18N.t('common_retry'),
-    onClick: () => loadMonth(),
-  });
-  cal.renderMessage(STATE.month, UI.el('div', { class: 'stack' }, [
-    UI.banner(UI.messageForError(err), 'error'),
-    UI.el('div', { class: 'form-row' }, [retry]),
-  ]));
 }
 
 function showNotFound() {
@@ -431,14 +380,14 @@ function openBookingForm(dateStr, slot) {
           location_title_th: slot.location_title_th,
         });
         showSuccessModal(dateStr, slot);
-        loadMonth(true);
+        cal.refreshMonth(dateStr.slice(0, 7));
       } catch (err) {
         const message = err.status === 429
           ? I18N.t('booker_book_rate_limited')
           : UI.messageForError(err);
         UI.showBanner(errorBox, message, 'error');
         // The slot went while the form was open — the list behind is stale.
-        if (err.status === 409) loadMonth(true);
+        if (err.status === 409) cal.refreshMonth(dateStr.slice(0, 7));
       }
     });
   });
@@ -606,7 +555,7 @@ function renderBookingRow(booking, phone, onCancelled) {
         onCancelled(booking.id);
         row.remove();
         UI.toast('success', I18N.t('booker_history_cancel_success'));
-        loadMonth(true);
+        cal.refreshMonth(bangkokDateStringFromUnix(booking.start_unix).slice(0, 7));
       } catch (err) {
         UI.toastError(err);
       }
@@ -683,7 +632,7 @@ function init() {
   els.locationFilter.setAttribute('aria-label', I18N.t('booker_location_filter_label'));
   I18N.apply();
   tabs.select('book');
-  loadMonth();
+  cal.start();
 }
 
 init();

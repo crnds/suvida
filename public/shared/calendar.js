@@ -1,5 +1,8 @@
-// Reusable month-view calendar grid, shared by the booker page and the
-// admin calendar tab. Mobile-first: 7-column grid, comfortable tap targets.
+// Reusable month-view calendar, shared by the booker page and the admin
+// calendar tab. Mobile-first: 7-column grid, comfortable tap targets.
+// Forward-only infinite scroll: months stack vertically starting at the
+// current Bangkok month, growing as the user scrolls; any month with no
+// slots at all is skipped rather than shown empty.
 // Depends on i18n.js + format.js + ui.js.
 'use strict';
 
@@ -36,78 +39,109 @@ function shiftMonthDateString(dateStr, deltaMonths) {
 function daysInMonth(y, m) { return new Date(Date.UTC(y, m, 0)).getUTCDate(); }
 function firstWeekdayOfMonth(y, m) { return new Date(Date.UTC(y, m - 1, 1)).getUTCDay(); }
 
-// container: element to render into.
-// handlers: { onMonthChange(monthStr), onDayClick(dateStr) }
-// cellFn(dateStr) -> { node, disabled, state, aria }, all fields optional:
-//   state 'free'|'full'|'closed' picks the card tint; aria is appended to the
-//   button's label so the state isn't colour-only for a screen reader.
-function createMonthCalendar(container, handlers) {
-  let currentMonth = null;
+// A month is skipped (never rendered) once this many *consecutive* candidate
+// months in a row turn up empty — a safety valve against scrolling forever
+// through a calendar nobody has activated any weeks on. Resets to zero the
+// moment a month with slots is found, so it never caps how far a user can
+// scroll overall, only how far a single "gap" of nothing can stretch.
+const LOOKAHEAD_CAP_MONTHS = 12;
+
+const ARROW_DELTA = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7 };
+
+// container: element to render into (becomes the scrollable stack root).
+// handlers: {
+//   loadMonth(monthStr) -> Promise<{ hasSlots }>  fetch + cache one month
+//   cellFn(monthStr, dateStr) -> { node, disabled, state, aria }, all optional
+//   onDayClick(dateStr)
+// }
+function createMonthStack(container, handlers) {
+  container.classList.add('calendar-stack');
+
+  let stackGen = 0;
+  let anchorMonth = null;
+  let frontierMonth = null;
+  let missStreak = 0;
+  let exhausted = false;
+  let pumping = false;
+  let lastAcceptedMonth = null; // most recent month appended; months only ever grow forward
+  let sentinelIntersecting = false;
+  let sentinel = null;
+  let observer = null;
+  let growChain = Promise.resolve();
+
+  const cells = new Map(); // dateStr -> button, spans every rendered month
+  const monthSections = new Map(); // monthStr -> { section, grid }
+  let rovingDate = null; // the one cell in the whole stack with tabindex=0
   let selectedDate = null;
-  let pendingFocusDate = null;
+  let pendingFocusDate = null; // keyboard crossing into a not-yet-rendered month
 
-  // The nav is built separately from the grid so loading and error states can
-  // keep it on screen. Replacing the whole container (as this used to do) left
-  // a failed month with no way to page away from it — the worst dead end in
-  // the booking flow.
-  function buildNav(monthStr) {
-    const [y, m] = monthStr.split('-').map(Number);
-    const nav = UI.el('div', { class: 'calendar-nav' });
-
-    const prevBtn = UI.button({
-      kind: 'tertiary', size: 'sm', iconOnly: true, icon: 'chevron-left',
-      ariaLabel: I18N.t('calendar_prev'),
-      onClick: () => handlers.onMonthChange(shiftMonthString(monthStr, -1)),
-    });
-    const nextBtn = UI.button({
-      kind: 'tertiary', size: 'sm', iconOnly: true, icon: 'chevron-right',
-      ariaLabel: I18N.t('calendar_next'),
-      onClick: () => handlers.onMonthChange(shiftMonthString(monthStr, 1)),
-    });
-
-    const label = UI.el('div', {
-      class: 'calendar-nav__label',
-      text: `${I18N.monthName(m)} ${y}`,
-      attrs: { 'aria-live': 'polite' },
-    });
-
-    nav.append(prevBtn, label, nextBtn);
-    return nav;
+  function blankCell() {
+    const d = document.createElement('div');
+    d.className = 'calendar-day-blank';
+    d.setAttribute('role', 'gridcell');
+    return d;
   }
 
-  // Draws the nav plus an arbitrary node in place of the grid. A failed or
-  // still-loading month must not silently steal a pending keyboard-driven
-  // focus target meant for a *different* render — keepPendingFocus is the
-  // one exception, for the transient loading spinner that always precedes
-  // the real render() for the same navigation.
-  function renderMessage(monthStr, node, { keepPendingFocus = false } = {}) {
-    currentMonth = monthStr;
-    if (!keepPendingFocus) pendingFocusDate = null;
-    container.replaceChildren(buildNav(monthStr), node);
+  function setRoving(dateStr) {
+    if (rovingDate && cells.has(rovingDate)) cells.get(rovingDate).setAttribute('tabindex', '-1');
+    rovingDate = dateStr;
+    if (cells.has(dateStr)) cells.get(dateStr).setAttribute('tabindex', '0');
   }
 
-  function render(monthStr, cellFn) {
-    currentMonth = monthStr;
-
-    // A re-render (language toggle, refresh after booking) rebuilds every
-    // button, which would otherwise drop keyboard focus to <body>. A month
-    // crossed via keyboard (PageUp/PageDown, or an arrow off the 1st/last)
-    // has no old focused cell in this DOM at all — pendingFocusDate is the
-    // fallback for that case.
-    const focusedDate = document.activeElement?.closest?.('.calendar-day')?.dataset.date;
-    const wantFocusDate = focusedDate || pendingFocusDate;
-
-    const [y, m] = monthStr.split('-').map(Number);
+  // Repaints one cell's content/state from cellFn without touching its
+  // tabindex or click handler — used both when a month is first built and by
+  // relabelAll()/refreshMonth() to repaint in place.
+  function paintCell(btn, monthStr, dateStr) {
+    const cell = (handlers.cellFn && handlers.cellFn(monthStr, dateStr)) || {};
     const today = bangkokTodayString();
+    const isPast = dateStr < today;
+    const isToday = dateStr === today;
+
+    btn.className = 'calendar-day';
+    btn.classList.add(`calendar-day--${cell.state || 'closed'}`);
+    if (isToday) btn.classList.add('calendar-day--today');
+    if (isPast) btn.classList.add('calendar-day--past');
+    if (dateStr === selectedDate) {
+      btn.classList.add('is-selected');
+      btn.setAttribute('aria-current', 'true');
+    } else {
+      btn.removeAttribute('aria-current');
+    }
+
+    const day = Number(dateStr.slice(8, 10));
+    btn.replaceChildren(UI.el('div', { class: 'calendar-day__num', text: String(day) }));
+    if (cell.node) btn.appendChild(cell.node);
+
+    const parts = [fmtWeekdayDate(dateStr)];
+    if (isToday) parts.push(I18N.t('calendar_today'));
+    if (cell.aria) parts.push(cell.aria);
+    btn.setAttribute('aria-label', parts.join(', '));
+
+    if (cell.disabled || isPast) btn.setAttribute('aria-disabled', 'true');
+    else btn.removeAttribute('aria-disabled');
+  }
+
+  function buildMonthSection(monthStr) {
+    const [y, m] = monthStr.split('-').map(Number);
+    const section = document.createElement('section');
+    section.className = 'calendar-month';
+    section.dataset.month = monthStr;
+
+    section.appendChild(UI.el('div', {
+      class: 'calendar-month__label',
+      text: `${I18N.monthName(m)} ${y}`,
+      attrs: { 'aria-hidden': 'true' },
+    }));
 
     const grid = UI.el('div', {
       class: 'calendar-grid',
       attrs: { role: 'grid', 'aria-label': `${I18N.monthName(m)} ${y}` },
     });
+    section.appendChild(grid);
 
-    // Row wrappers exist for the accessibility tree only — `display:
-    // contents` (theme.css) keeps them out of the 7-column layout so the
-    // grid items stay the day cells, not the rows. See hand-off §4.
+    // Row wrappers exist for the accessibility tree only — `display: contents`
+    // (theme.css) keeps them out of the 7-column layout so the grid items
+    // stay the day cells, not the rows.
     const headerRow = UI.el('div', { class: 'calendar-row', attrs: { role: 'row' } });
     for (let d = 0; d < 7; d++) {
       headerRow.appendChild(UI.el('div', {
@@ -133,119 +167,244 @@ function createMonthCalendar(container, handlers) {
       if (row.children.length === 7) row = null;
     };
 
-    // Leading placeholders hold their grid track without painting a card.
-    // Real (non-hidden) empty gridcells, not aria-hidden — a row claiming 7
-    // cells while hiding some of them would misreport its own column count.
-    for (let i = 0; i < startWeekday; i++) {
-      addCell(UI.el('div', { class: 'calendar-day-blank', attrs: { role: 'gridcell' } }));
-    }
-
-    const cells = new Map();
-    let toFocus = null;
+    for (let i = 0; i < startWeekday; i++) addCell(blankCell());
 
     for (let day = 1; day <= numDays; day++) {
       const dateStr = `${y}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-      const cell = (cellFn && cellFn(dateStr)) || {};
-      const isPast = dateStr < today;
-      const isToday = dateStr === today;
 
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.setAttribute('role', 'gridcell');
-      btn.className = 'calendar-day';
       btn.dataset.date = dateStr;
-      btn.classList.add(`calendar-day--${cell.state || 'closed'}`);
-      if (isToday) btn.classList.add('calendar-day--today');
-      if (isPast) btn.classList.add('calendar-day--past');
-      // aria-current is the source of truth for selection, per the project's
-      // "selected state comes from ARIA attributes, never a class" rule.
-      if (dateStr === selectedDate) {
-        btn.classList.add('is-selected');
-        btn.setAttribute('aria-current', 'true');
-      }
-
-      btn.appendChild(UI.el('div', { class: 'calendar-day__num', text: String(day) }));
-      if (cell.node) btn.appendChild(cell.node);
-
-      const parts = [fmtWeekdayDate(dateStr)];
-      if (isToday) parts.push(I18N.t('calendar_today'));
-      if (cell.aria) parts.push(cell.aria);
-      btn.setAttribute('aria-label', parts.join(', '));
-
-      if (cell.disabled || isPast) {
-        btn.setAttribute('aria-disabled', 'true');
-      }
-      // Attached unconditionally — unavailable cells stay in the focus
-      // order (aria-disabled, not disabled), so the guard has to live here,
-      // not in whether the listener exists at all.
+      btn.setAttribute('tabindex', '-1');
+      // Attached unconditionally — unavailable cells stay in the focus order
+      // (aria-disabled, not disabled), so the guard has to live here.
       btn.addEventListener('click', () => {
         if (btn.getAttribute('aria-disabled') === 'true') return;
         handlers.onDayClick(dateStr);
       });
 
-      if (dateStr === wantFocusDate) toFocus = btn;
       cells.set(dateStr, btn);
+      paintCell(btn, monthStr, dateStr);
       addCell(btn);
     }
 
-    for (let i = 0; i < trailing; i++) {
-      addCell(UI.el('div', { class: 'calendar-day-blank', attrs: { role: 'gridcell' } }));
+    for (let i = 0; i < trailing; i++) addCell(blankCell());
+
+    // Roving tabindex is decided once, by whichever month is built first:
+    // the selected day, else today (if it falls in this month), else this
+    // month's 1st. Later months never steal it on their own.
+    if (rovingDate === null) {
+      const today = bangkokTodayString();
+      const firstDayStr = `${y}-${String(m).padStart(2, '0')}-01`;
+      const initial = (selectedDate && cells.has(selectedDate)) ? selectedDate
+        : cells.has(today) ? today
+        : firstDayStr;
+      setRoving(initial);
     }
 
-    // Roving tabindex: exactly one cell is a tab stop. Priority: the
-    // selected day, then today (if in this month), then the 1st.
-    const firstDayStr = `${y}-${String(m).padStart(2, '0')}-01`;
-    const rovingDate = (wantFocusDate && cells.has(wantFocusDate)) ? wantFocusDate
-      : (selectedDate && cells.has(selectedDate)) ? selectedDate
-      : cells.has(today) ? today
-      : firstDayStr;
-    cells.forEach((btn, dateStr) => {
-      btn.setAttribute('tabindex', dateStr === rovingDate ? '0' : '-1');
-    });
-
-    const ARROW_DELTA = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7 };
-
-    function moveFocusTo(target) {
-      const targetMonth = target.slice(0, 7);
-      if (targetMonth === currentMonth) {
-        const btn2 = cells.get(target);
-        if (!btn2) return;
-        cells.forEach((b, d2) => b.setAttribute('tabindex', d2 === target ? '0' : '-1'));
-        btn2.focus({ preventScroll: true });
-      } else {
-        // The target isn't rendered yet — the consumer has to fetch the new
-        // month first. render() picks this up on the far side of that fetch
-        // (Task 6); until then, this just pages the month.
-        pendingFocusDate = target;
-        handlers.onMonthChange(targetMonth);
+    // A keyboard crossing (PageDown / arrow off the edge) into a month that
+    // wasn't rendered yet lands here once this build catches up to it. If the
+    // exact target month was itself skipped (no slots), land on the 1st of
+    // whichever later month is the first one actually rendered — the exact
+    // computed date has no cell to land on, but the user's intent ("move
+    // forward") is still honoured by the next real day.
+    if (pendingFocusDate && monthStr >= pendingFocusDate.slice(0, 7)) {
+      const exact = monthStr === pendingFocusDate.slice(0, 7) && cells.has(pendingFocusDate);
+      const target = exact ? pendingFocusDate : `${monthStr}-01`;
+      pendingFocusDate = null;
+      if (cells.has(target)) {
+        setRoving(target);
+        cells.get(target).focus({ preventScroll: true });
       }
     }
 
-    grid.addEventListener('keydown', (e) => {
-      if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
-      const btn = e.target.closest('.calendar-day');
-      if (!btn) return;
-      const date = btn.dataset.date;
-      let target;
+    monthSections.set(monthStr, { section, grid });
+    return section;
+  }
 
-      if (e.key in ARROW_DELTA) {
-        target = shiftDateString(date, ARROW_DELTA[e.key]);
-      } else if (e.key === 'Home' || e.key === 'End') {
-        const dow = weekdayOf(date);
-        target = shiftDateString(date, e.key === 'Home' ? -dow : (6 - dow));
-      } else if (e.key === 'PageUp' || e.key === 'PageDown') {
-        target = shiftMonthDateString(date, e.key === 'PageUp' ? -1 : 1);
-      } else {
-        return;
+  function appendMonthSection(monthStr) {
+    const section = buildMonthSection(monthStr);
+    container.insertBefore(section, sentinel);
+  }
+
+  function showFrontierError(err) {
+    const retryBtn = UI.button({
+      kind: 'secondary', icon: 'rotate-right', label: I18N.t('common_retry'),
+      onClick: () => { retryBtn.disabled = true; pump(); },
+    });
+    sentinel.replaceChildren(UI.el('div', { class: 'stack' }, [
+      UI.banner(UI.messageForError(err), 'error'),
+      UI.el('div', { class: 'form-row' }, [retryBtn]),
+    ]));
+  }
+
+  function showEndOfStack() {
+    sentinel.replaceChildren(UI.emptyState({
+      icon: 'calendar-check',
+      text: I18N.t('calendar_stack_end'),
+    }));
+    observer?.disconnect();
+  }
+
+  // Fetches one candidate month at a time, skipping any with no slots at
+  // all, until one is accepted (rendered), the lookahead cap is hit, or the
+  // fetch fails. Never advances the frontier past a month that errored, so a
+  // retry re-fetches the same month rather than silently skipping it.
+  async function growOneAcceptedImpl() {
+    const myGen = stackGen;
+    for (;;) {
+      if (exhausted) return { status: 'capped' };
+      const candidate = frontierMonth;
+      let result;
+      try {
+        result = await handlers.loadMonth(candidate);
+      } catch (err) {
+        if (myGen !== stackGen) return { status: 'stale' };
+        showFrontierError(err);
+        return { status: 'error' };
+      }
+      if (myGen !== stackGen) return { status: 'stale' };
+
+      frontierMonth = shiftMonthString(frontierMonth, 1);
+
+      if (result && result.hasSlots) {
+        missStreak = 0;
+        appendMonthSection(candidate);
+        lastAcceptedMonth = candidate;
+        return { status: 'appended', monthStr: candidate };
       }
 
-      e.preventDefault();
-      moveFocusTo(target);
-    });
+      missStreak++;
+      if (missStreak >= LOOKAHEAD_CAP_MONTHS) {
+        showEndOfStack();
+        exhausted = true;
+        return { status: 'capped' };
+      }
+    }
+  }
 
-    container.replaceChildren(buildNav(monthStr), grid);
-    toFocus?.focus({ preventScroll: true });
+  // Serializes every call through one queue so a scroll-triggered pump() and
+  // a keyboard/notification-triggered revealMonth() never race over
+  // frontierMonth/missStreak.
+  function growOneAccepted() {
+    const run = growChain.then(() => growOneAcceptedImpl());
+    growChain = run.catch(() => {});
+    return run;
+  }
+
+  // Always attempts at least one growth step (so start() populates the
+  // stack immediately, before the IntersectionObserver has ever fired), then
+  // keeps going for as long as the sentinel remains on screen — a fast flick
+  // past several accepted months must not strand the sentinel visible with
+  // nothing loading, which a single IO callback alone would do.
+  async function pump() {
+    const myGen = stackGen;
+    if (pumping) return;
+    pumping = true;
+    let result;
+    try {
+      do {
+        if (myGen !== stackGen) { result = { status: 'stale' }; break; }
+        sentinel.replaceChildren(UI.loadingRow());
+        result = await growOneAccepted();
+      } while (result.status === 'appended' && sentinelIntersecting && !exhausted && myGen === stackGen);
+    } finally {
+      pumping = false;
+    }
+    if (myGen === stackGen && result && result.status === 'appended') sentinel.replaceChildren();
+  }
+
+  async function start() {
+    stackGen++;
+    observer?.disconnect();
+
+    container.replaceChildren();
+    cells.clear();
+    monthSections.clear();
+    rovingDate = null;
     pendingFocusDate = null;
+    missStreak = 0;
+    exhausted = false;
+    lastAcceptedMonth = null;
+
+    anchorMonth = bangkokMonthString();
+    frontierMonth = anchorMonth;
+
+    sentinel = document.createElement('div');
+    sentinel.className = 'calendar-stack__sentinel';
+    container.appendChild(sentinel);
+
+    observer = new IntersectionObserver((entries) => {
+      sentinelIntersecting = entries[entries.length - 1].isIntersecting;
+      if (sentinelIntersecting) pump();
+    }, { rootMargin: '600px 0px' });
+    observer.observe(sentinel);
+
+    await pump();
+  }
+
+  // Re-fetches one already-rendered month and repaints its cells in place —
+  // no scroll change, no effect on any other month. If the month turns out
+  // to have become empty, it stays on screen (all-closed) rather than being
+  // yanked out from under whatever the user is looking at.
+  async function refreshMonth(monthStr) {
+    if (!monthSections.has(monthStr)) return;
+    try {
+      await handlers.loadMonth(monthStr);
+    } catch {
+      return; // best-effort; leave the section showing its last-known state
+    }
+    const [y, m] = monthStr.split('-').map(Number);
+    const numDays = daysInMonth(y, m);
+    for (let day = 1; day <= numDays; day++) {
+      const dateStr = `${y}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      const btn = cells.get(dateStr);
+      if (btn) paintCell(btn, monthStr, dateStr);
+    }
+  }
+
+  // Grows the stack (same skip-empty loop as scroll) until monthStr is
+  // rendered or the lookahead cap is hit, then scrolls it into view. Backs
+  // PageDown/arrow-key month crossing and admin's notification "go to day".
+  async function revealMonth(monthStr) {
+    if (monthStr < anchorMonth) return false;
+    const myGen = stackGen;
+    // Stops once a month at or after the target has been accepted, not only
+    // on an exact match — the target month itself may have no slots and be
+    // permanently skipped, in which case the first later accepted month is
+    // as far as this can ever get (buildMonthSection already resolves any
+    // pending keyboard focus onto it; looking for the exact month forever
+    // would never terminate short of the lookahead cap).
+    while (stackGen === myGen && !exhausted && (lastAcceptedMonth === null || lastAcceptedMonth < monthStr)) {
+      const result = await growOneAccepted();
+      if (result.status !== 'appended' && result.status !== 'stale') break;
+    }
+    if (stackGen !== myGen) return false;
+    const entry = monthSections.get(monthStr)
+      || (lastAcceptedMonth ? monthSections.get(lastAcceptedMonth) : null);
+    if (!entry) return false;
+    entry.section.scrollIntoView({ block: 'start' });
+    return true;
+  }
+
+  // i18n toggle: repaint every rendered month's labels and cells, no re-fetch.
+  function relabelAll() {
+    monthSections.forEach(({ section, grid }, monthStr) => {
+      const [y, m] = monthStr.split('-').map(Number);
+      const label = section.querySelector('.calendar-month__label');
+      if (label) label.textContent = `${I18N.monthName(m)} ${y}`;
+      grid.setAttribute('aria-label', `${I18N.monthName(m)} ${y}`);
+      grid.querySelectorAll('.calendar-weekday').forEach((el, i) => {
+        el.textContent = I18N.weekdayShort(i);
+      });
+      const numDays = daysInMonth(y, m);
+      for (let day = 1; day <= numDays; day++) {
+        const dateStr = `${y}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        const btn = cells.get(dateStr);
+        if (btn) paintCell(btn, monthStr, dateStr);
+      }
+    });
   }
 
   // Highlights the day whose panel is open, so the calendar behind the sheet
@@ -260,10 +419,46 @@ function createMonthCalendar(container, handlers) {
     });
   }
 
+  function moveFocusTo(target) {
+    const firstAnchorDate = `${anchorMonth}-01`;
+    // Nothing earlier than the anchor month exists in a forward-only stack.
+    if (target < firstAnchorDate) return;
+    if (cells.has(target)) {
+      setRoving(target);
+      cells.get(target).focus({ preventScroll: true });
+      return;
+    }
+    pendingFocusDate = target;
+    revealMonth(target.slice(0, 7));
+  }
+
+  container.addEventListener('keydown', (e) => {
+    if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+    const btn = e.target.closest('.calendar-day');
+    if (!btn) return;
+    const date = btn.dataset.date;
+    let target;
+
+    if (e.key in ARROW_DELTA) {
+      target = shiftDateString(date, ARROW_DELTA[e.key]);
+    } else if (e.key === 'Home' || e.key === 'End') {
+      const dow = weekdayOf(date);
+      target = shiftDateString(date, e.key === 'Home' ? -dow : (6 - dow));
+    } else if (e.key === 'PageUp' || e.key === 'PageDown') {
+      target = shiftMonthDateString(date, e.key === 'PageUp' ? -1 : 1);
+    } else {
+      return;
+    }
+
+    e.preventDefault();
+    moveFocusTo(target);
+  });
+
   return {
-    render,
-    renderMessage,
+    start,
+    refreshMonth,
+    revealMonth,
+    relabelAll,
     setSelected,
-    get currentMonth() { return currentMonth; },
   };
 }

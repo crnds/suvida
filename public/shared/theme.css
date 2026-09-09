@@ -250,6 +250,9 @@ h1, h2, h3, h4, .text-hero, .text-h1, .text-h2, .text-h3 {
   gap: 0;
   border-bottom: var(--border-w) solid var(--border);
   overflow-x: auto;
+  /* Without this, overflow-x: auto computes overflow-y to auto too (per the
+     CSS overflow spec), letting the bar scroll vertically on mobile. */
+  overflow-y: hidden;
   scrollbar-width: none;
   /* Snap so a half-scrolled tab never looks like a rendering bug. */
   scroll-snap-type: x proximity;
@@ -909,28 +912,30 @@ input[type="checkbox"], input[type="radio"] {
 
 /* ── Calendar ───────────────────────────────────────────── */
 
-.calendar-nav {
+/* The scrollable stack root (#calendar / #admin-calendar): months grow
+   downward as the user scrolls, forward-only from the current month. */
+.calendar-stack {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-  margin-bottom: var(--space-2);
+  flex-direction: column;
+  gap: var(--space-4);
 }
-.calendar-nav__label {
+
+.calendar-month__label {
   font-family: var(--font-head);
   font-size: clamp(1.0625rem, 3.5vw, 1.25rem);
   font-weight: 500;
   text-align: center;
-  flex: 1;
-  min-width: 0;
+  margin-bottom: var(--space-2);
 }
-/* Month paging was a 12px chevron in a 32px ghost button — the weakest
-   affordance on the most-used control in the app. */
-.calendar-nav .btn {
-  border-color: var(--border);
-  color: var(--text);
+
+/* Reserves room for the loading spinner / retry banner / end-of-stack
+   message painted here as the user scrolls toward it. */
+.calendar-stack__sentinel {
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
-.calendar-nav .btn:hover:not(:disabled) { background: var(--surface-alt); border-color: var(--primary); color: var(--primary); }
 
 /* One day = one card. minmax(0,1fr) + min-width:0 stop a long Thai label's
    min-content width from widening a track and scrolling the page sideways. */
