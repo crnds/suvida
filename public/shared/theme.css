@@ -227,6 +227,31 @@ h1, h2, h3, h4, .text-hero, .text-h1, .text-h2, .text-h3 {
   gap: var(--space-2);
 }
 
+/* Teacher's-view marker: distinguishes the admin header from owner/booking.
+   Stacks a thin labelled ribbon above the normal brand/actions row. */
+.app-header--admin { flex-direction: column; align-items: stretch; padding: 0; }
+
+.app-header__ribbon {
+  background: var(--accent);
+  color: #fff;
+  height: 16px;
+  line-height: 16px;
+  padding-top: env(safe-area-inset-top, 0px);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-align: center;
+}
+
+.app-header__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--gutter);
+}
+
 .app-header__brand {
   font-family: var(--font-head);
   font-size: clamp(1rem, 4vw, 1.25rem);
@@ -763,6 +788,19 @@ input[type="checkbox"], input[type="radio"] {
    reset wherever the row stacks. */
 .list-row--stacked { flex-direction: column; align-items: flex-start; gap: var(--space-1); }
 .list-row--stacked > .list-row__main { flex: 0 0 auto; width: 100%; }
+
+/* Booking log: one entry = one line. Chip + name + lesson time on the
+   left, created-at/actor pinned to the right; wraps to a second line only
+   below 480px, where there isn't room for both halves side by side. */
+.log-row { display: flex; align-items: center; gap: var(--space-2); width: 100%; }
+.log-row__lesson { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.log-row__meta { flex: none; margin-left: auto; white-space: nowrap; }
+
+@media (max-width: 480px) {
+  .log-row { flex-wrap: wrap; }
+  .log-row__lesson { flex-basis: 100%; white-space: normal; }
+  .log-row__meta { margin-left: 0; }
+}
 
 /* ── Week grid (schedule template: one column per weekday) ─ */
 /* Two shapes, one DOM. Wide viewports get the seven-column table a weekly

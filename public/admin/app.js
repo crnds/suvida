@@ -3,6 +3,8 @@
 // the booking log. Session presence is inferred via /api/admin/me.
 'use strict';
 
+const NOTIF_CLEARED_KEY = 'suvida_v1_admin_notif_cleared_id';
+
 const STATE = {
   admin: null,
   activeTab: 'schedule',
@@ -24,6 +26,8 @@ const STATE = {
   dayPanel: null,
   // Overlapping log loads (filter changes, "Load more") must not merge.
   logToken: 0,
+  notifications: [],
+  notifClearedId: Number(localStorage.getItem(NOTIF_CLEARED_KEY) || 0),
 };
 
 const els = {
@@ -1138,6 +1142,7 @@ async function loadNotifications() {
   try {
     const data = await Api.notificationsList();
     STATE.sessionUnreadIds = new Set(data.notifications.filter((n) => n.unread).map((n) => n.id));
+    STATE.notifications = data.notifications;
     renderNotifications(data.notifications);
     if (data.notifications.length > 0) {
       const maxId = Math.max(...data.notifications.map((n) => n.id));
@@ -1153,7 +1158,9 @@ async function loadNotifications() {
 }
 
 function renderNotifications(notifications) {
-  if (notifications.length === 0) {
+  const visible = notifications.filter((n) => n.id > STATE.notifClearedId);
+
+  if (visible.length === 0) {
     els.notificationsList.replaceChildren(UI.emptyState({
       icon: 'bell-slash',
       text: I18N.t('notif_empty'),
@@ -1161,7 +1168,17 @@ function renderNotifications(notifications) {
     return;
   }
 
-  els.notificationsList.replaceChildren(...notifications.map((n) => {
+  const clearBtn = UI.button({
+    kind: 'tertiary', size: 'sm', icon: 'trash-can',
+    label: I18N.t('notif_clear_btn'),
+    onClick: () => {
+      STATE.notifClearedId = Math.max(...STATE.notifications.map((n) => n.id));
+      localStorage.setItem(NOTIF_CLEARED_KEY, String(STATE.notifClearedId));
+      renderNotifications(STATE.notifications);
+    },
+  });
+
+  const rows = visible.map((n) => {
     const unread = STATE.sessionUnreadIds.has(n.id);
     const textKey = n.type === 'cancelled' ? 'notif_new_cancel' : 'notif_new_booking';
 
@@ -1186,7 +1203,9 @@ function renderNotifications(notifications) {
       meta: fmtDateTime(n.created_at),
       actions: [goBtn],
     });
-  }));
+  });
+
+  els.notificationsList.replaceChildren(...rows, UI.el('div', { class: 'form-row' }, [clearBtn]));
 }
 
 // ── Log ──────────────────────────────────────────────────────
@@ -1283,26 +1302,29 @@ function renderLog() {
   const ordered = STATE.logOrderDesc ? STATE.logEvents : [...STATE.logEvents].reverse();
 
   els.logList.replaceChildren(...ordered.map((ev) => {
-    const meta = UI.el('div', { class: 'row-wrap' }, [
-      UI.el('span', {
-        class: `status-chip ${LOG_CHIP_CLASS[ev.type]}`,
-        text: I18N.t('log_type_' + ev.type),
-      }),
-      UI.el('span', { class: 'text-caption tabular-nums', text: fmtDateTime(ev.created_at) }),
-      UI.el('span', { class: 'text-caption muted', text: I18N.t('log_actor_' + ev.actor) }),
-    ]);
-
     const lessonTime = ev.type === 'moved'
       ? I18N.t('log_move_arrow', { before: fmtDateTime(ev.prev_slot_unix), after: fmtDateTime(ev.slot_unix) })
       : fmtDateTime(ev.slot_unix);
 
-    const main = UI.el('div', { class: 'text-body' }, [
-      UI.el('strong', { text: ev.booker_name }),
-      UI.el('span', { class: 'tabular-nums', text: ` · ${lessonTime}` }),
+    // One flex row per entry rather than a stacked main+meta pair — chip,
+    // name and lesson time on the left, created-at/actor pinned right, so
+    // one event reads as one line instead of two.
+    const main = UI.el('div', { class: 'log-row' }, [
+      UI.el('span', {
+        class: `status-chip ${LOG_CHIP_CLASS[ev.type]}`,
+        text: I18N.t('log_type_' + ev.type),
+      }),
+      UI.el('span', { class: 'log-row__lesson' }, [
+        UI.el('strong', { text: ev.booker_name }),
+        UI.el('span', { class: 'tabular-nums', text: ` · ${lessonTime}` }),
+      ]),
+      UI.el('span', {
+        class: 'log-row__meta text-caption muted tabular-nums',
+        text: `${fmtDateTime(ev.created_at)} · ${I18N.t('log_actor_' + ev.actor)}`,
+      }),
     ]);
 
-    // Stacked by class rather than by three inline styles set from JS.
-    return UI.listRow({ mainNode: main, metaNode: meta, stacked: true });
+    return UI.listRow({ mainNode: main });
   }));
 }
 

@@ -19,6 +19,7 @@ const DICT = {
     nav_settings: 'ตั้งค่า',
     nav_logout: 'ออกจากระบบ',
     nav_admins: 'รายชื่อครู',
+    header_teacher_view: 'มุมมองครู',
 
     weekday_short_0: 'อา',
     weekday_short_1: 'จ',
@@ -184,6 +185,7 @@ const DICT = {
     notif_new_cancel: '{name} ยกเลิกเวลา {time}',
     notif_go_to_day: 'ไปที่วันนี้',
     notif_unread_count: 'แจ้งเตือนใหม่ {n} รายการ',
+    notif_clear_btn: 'ล้างการแจ้งเตือน',
 
     // Admin — log
     log_filter_type: 'ประเภท', log_filter_actor: 'ผู้ทำรายการ', log_filter_month: 'เดือน',
@@ -288,6 +290,7 @@ const DICT = {
     nav_settings: 'Settings',
     nav_logout: 'Log out',
     nav_admins: 'Teachers',
+    header_teacher_view: "Teacher's view",
 
     weekday_short_0: 'Sun', weekday_short_1: 'Mon', weekday_short_2: 'Tue', weekday_short_3: 'Wed',
     weekday_short_4: 'Thu', weekday_short_5: 'Fri', weekday_short_6: 'Sat',
@@ -438,6 +441,7 @@ const DICT = {
     notif_new_cancel: '{name} cancelled {time}',
     notif_go_to_day: 'Go to this day',
     notif_unread_count: '{n} unread notification(s)',
+    notif_clear_btn: 'Clear notifications',
 
     log_filter_type: 'Type', log_filter_actor: 'Actor', log_filter_month: 'Month',
     log_type_all: 'All',

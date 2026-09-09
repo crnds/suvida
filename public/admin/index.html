@@ -17,13 +17,13 @@
 
 <a class="skip-link" href="#main" data-i18n="a11y_skip_to_content"></a>
 
-<header class="app-header">
-  <h1 class="app-header__brand" id="brand-name">Suvida</h1>
-  <div class="app-header__actions">
-    <div id="lang-toggle"></div>
-    <button class="btn btn-ghost btn-sm hidden" id="logout-btn">
-      <i class="fa-solid fa-arrow-right-from-bracket icon" aria-hidden="true"></i><span data-i18n="nav_logout"></span>
-    </button>
+<header class="app-header app-header--admin">
+  <div class="app-header__ribbon"><span data-i18n="header_teacher_view"></span></div>
+  <div class="app-header__row">
+    <h1 class="app-header__brand" id="brand-name">Suvida</h1>
+    <div class="app-header__actions">
+      <div id="lang-toggle"></div>
+    </div>
   </div>
 </header>
 
@@ -225,6 +225,14 @@
         <div class="form-row">
           <button type="button" class="btn btn-destructive" id="settings-reset-btn">
             <i class="fa-solid fa-rotate-left icon" aria-hidden="true"></i><span data-i18n="settings_reset_btn"></span>
+          </button>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="form-row">
+          <button type="button" class="btn btn-ghost hidden" id="logout-btn">
+            <i class="fa-solid fa-arrow-right-from-bracket icon" aria-hidden="true"></i><span data-i18n="nav_logout"></span>
           </button>
         </div>
       </div>
