@@ -240,48 +240,79 @@ function createMonthStack(container, handlers) {
   }
 
   function showEndOfStack() {
-    sentinel.replaceChildren(UI.emptyState({
-      icon: 'calendar-check',
-      text: I18N.t('calendar_stack_end'),
-    }));
+    if (lastAcceptedMonth === null) {
+      sentinel.replaceChildren(UI.emptyState({
+        icon: 'calendar-check',
+        text: I18N.t('calendar_stack_end'),
+      }));
+    } else {
+      sentinel.replaceChildren();
+    }
     observer?.disconnect();
   }
 
-  // Fetches one candidate month at a time, skipping any with no slots at
-  // all, until one is accepted (rendered), the lookahead cap is hit, or the
-  // fetch fails. Never advances the frontier past a month that errored, so a
-  // retry re-fetches the same month rather than silently skipping it.
+  // Wraps a single loadMonth call so Promise.all can collect settled results
+  // without short-circuiting on a rejection.
+  async function fetchMonth(monthStr) {
+    try {
+      return { ok: true, monthStr, result: await handlers.loadMonth(monthStr) };
+    } catch (err) {
+      return { ok: false, monthStr, err };
+    }
+  }
+
+  // Probes forward from the frontier until one candidate is accepted
+  // (rendered), the lookahead cap is hit, or a fetch fails. The first
+  // candidate is always probed alone — the common case (a teacher who keeps
+  // weeks activated ahead) finds a month with slots immediately and this
+  // costs exactly the one round trip it always did. Only once a candidate
+  // misses does this switch to fetching the rest of the remaining lookahead
+  // concurrently: a long unactivated stretch used to mean up to
+  // LOOKAHEAD_CAP_MONTHS *sequential* round trips before the spinner could
+  // clear (confirmed: the QA slug's seed data, which activates only a few
+  // weeks ahead, fires 12 consecutive probes on first load) — invisible on
+  // localhost but multiplied by real network/serverless latency in
+  // production. Batching bounds that to at most one extra round trip.
+  // Results are still processed strictly in month order even though the
+  // fetches ran concurrently, so accept/skip/error precedence, frontier
+  // advancement, and "a retry re-fetches the same failed month" all match
+  // the old sequential behavior exactly.
   async function growOneAcceptedImpl() {
     const myGen = stackGen;
-    for (;;) {
-      if (exhausted) return { status: 'capped' };
-      const candidate = frontierMonth;
-      let result;
-      try {
-        result = await handlers.loadMonth(candidate);
-      } catch (err) {
-        if (myGen !== stackGen) return { status: 'stale' };
-        showFrontierError(err);
-        return { status: 'error' };
-      }
+    let probeBatch = 1;
+    while (!exhausted) {
+      const remaining = LOOKAHEAD_CAP_MONTHS - missStreak;
+      const size = Math.min(probeBatch, remaining);
+      const candidates = [];
+      let m = frontierMonth;
+      for (let i = 0; i < size; i++) { candidates.push(m); m = shiftMonthString(m, 1); }
+
+      const results = await Promise.all(candidates.map(fetchMonth));
       if (myGen !== stackGen) return { status: 'stale' };
 
-      frontierMonth = shiftMonthString(frontierMonth, 1);
-
-      if (result && result.hasSlots) {
-        missStreak = 0;
-        appendMonthSection(candidate);
-        lastAcceptedMonth = candidate;
-        return { status: 'appended', monthStr: candidate };
+      for (const { ok, monthStr: candidate, result, err } of results) {
+        if (!ok) {
+          frontierMonth = candidate;
+          showFrontierError(err);
+          return { status: 'error' };
+        }
+        frontierMonth = shiftMonthString(candidate, 1);
+        if (result && result.hasSlots) {
+          missStreak = 0;
+          appendMonthSection(candidate);
+          lastAcceptedMonth = candidate;
+          return { status: 'appended', monthStr: candidate };
+        }
+        missStreak++;
+        if (missStreak >= LOOKAHEAD_CAP_MONTHS) {
+          showEndOfStack();
+          exhausted = true;
+          return { status: 'capped' };
+        }
       }
-
-      missStreak++;
-      if (missStreak >= LOOKAHEAD_CAP_MONTHS) {
-        showEndOfStack();
-        exhausted = true;
-        return { status: 'capped' };
-      }
+      probeBatch = LOOKAHEAD_CAP_MONTHS; // widen after the first miss
     }
+    return { status: 'capped' };
   }
 
   // Serializes every call through one queue so a scroll-triggered pump() and

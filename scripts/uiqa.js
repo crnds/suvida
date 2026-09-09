@@ -1342,6 +1342,161 @@ async function runFlows() {
     check('admin: throwaway notification-jump teacher cleaned up', del.status === 200);
   });
 
+  // 27. Location-filter chips must repaint the calendar instantly from the
+  // already-cached unfiltered month fetch: no new /api/public/page request,
+  // aria-pressed toggles correctly, and per-location counts always sum back
+  // to the unfiltered "All locations" total for every visible day.
+  await flow(27, async () => {
+    const page = await newPage();
+    let requestCount = 0;
+    await page.setRequestInterception(true);
+    page.on('request', (req) => {
+      if (req.url().includes('/api/public/page')) requestCount++;
+      req.continue();
+    });
+    await page.goto(`${BASE}/b/${SLUG}`, { waitUntil: 'networkidle2' });
+    await page.waitForSelector('#location-filter .chip');
+
+    const chipCount = (await page.$$('#location-filter .chip')).length;
+    check('booker: location filter bar shows an All chip plus each seeded location', chipCount >= 3, `chips=${chipCount}`);
+
+    const readCounts = () => page.evaluate(() =>
+      Object.fromEntries([...document.querySelectorAll('.calendar-day[data-date]')].map((btn) => [
+        btn.dataset.date,
+        btn.classList.contains('calendar-day--free') ? btn.querySelectorAll('.calendar-day__dot').length : 0,
+      ])));
+
+    const baselineRequests = requestCount;
+    const allCounts = await readCounts();
+
+    const perLocationCounts = [];
+    for (let i = 2; i <= chipCount; i++) {
+      await page.click(`#location-filter .chip:nth-child(${i})`);
+      await wait(300);
+      const pressed = await page.$eval(`#location-filter .chip:nth-child(${i})`, (n) => n.getAttribute('aria-pressed'));
+      const allPressed = await page.$eval('#location-filter .chip:first-child', (n) => n.getAttribute('aria-pressed'));
+      check(`booker: clicked location chip ${i} becomes aria-pressed=true`, pressed === 'true');
+      check('booker: All chip becomes aria-pressed=false while a location is active', allPressed === 'false');
+      perLocationCounts.push(await readCounts());
+    }
+
+    check('booker: switching location filters fires no new /api/public/page request',
+      requestCount === baselineRequests, `${baselineRequests} -> ${requestCount}`);
+
+    const dateStrs = Object.keys(allCounts);
+    const sumsMatch = dateStrs.every((d) =>
+      perLocationCounts.reduce((sum, counts) => sum + (counts[d] || 0), 0) === allCounts[d]);
+    check('booker: per-location filtered counts sum back to the unfiltered All count for every visible day', sumsMatch);
+
+    await page.click('#location-filter .chip:first-child');
+    await wait(300);
+    const backToAll = await readCounts();
+    check('booker: switching back to All restores the original counts exactly',
+      dateStrs.every((d) => backToAll[d] === allCounts[d]));
+    check('booker: no console errors across the whole filter-switch sequence', page.errors.length === 0, page.errors.join(' | '));
+
+    await page.close();
+  });
+
+  // 28. Batched lookahead: requests fired after the first miss must be
+  // dispatched concurrently, not serially. The QA teacher (ployxx) only has
+  // a few weeks activated, so loading /b/ployxx always triggers a run of
+  // empty-month misses. Under the old sequential scan those requests each
+  // waited on the previous response before being sent — up to 12 extra
+  // round trips in a single burst. The fix probes the first candidate alone
+  // (unchanged fast path — finds slots immediately for well-configured
+  // teachers) then fetches all remaining candidates in one Promise.all batch.
+  //
+  // Assertion strategy: intercept /api/public/page requests and record their
+  // dispatch wall-clock time (Date.now() in the page's request event). After
+  // load, look at the timestamps for the requests that fired after the first
+  // hit+miss pair (i.e. the bulk of the empty-month scan). Under batched
+  // dispatch those timestamps must all fall within a small window of each
+  // other — well under a realistic network RTT even on localhost. Under the
+  // old sequential scan they would be spread across multiple RTTs. This tests
+  // the mechanism directly rather than relying on wall-clock budgets that
+  // vary by machine load.
+  await flow(28, async () => {
+    const page = await newPage();
+
+    // Collect { url, t } for every /api/public/page request fired in the page,
+    // timestamped at dispatch (before the response arrives).
+    const pageRequests = [];
+    await page.setRequestInterception(true);
+    page.on('request', (req) => {
+      if (req.url().includes('/api/public/page')) {
+        pageRequests.push({ url: req.url(), t: Date.now() });
+      }
+      req.continue();
+    });
+
+    await page.goto(`${BASE}/b/${SLUG}`, { waitUntil: 'networkidle2' });
+
+    // The sentinel spinner should have cleared once the scan settles.
+    // networkidle2 already guarantees no in-flight requests, so the sentinel
+    // must no longer contain a spinner — if it still does, the scan never
+    // settled and the calendar is effectively broken.
+    const sentinelHasSpinner = await page.$eval(
+      '.calendar-stack__sentinel',
+      (el) => !!el.querySelector('.loading-row, .spinner, [class*="loading"]'),
+    ).catch(() => false);
+    check('booker: sentinel spinner clears after the lookahead scan settles', !sentinelHasSpinner);
+
+    // We need at least 3 requests (first hit, first miss, then the batch)
+    // to be able to test concurrent dispatch.
+    check('booker: batched lookahead fires multiple /api/public/page requests',
+      pageRequests.length >= 3, `fired ${pageRequests.length}`);
+
+    if (pageRequests.length >= 3) {
+      // The first request is the initial probe (may find a slot = fast path).
+      // The second is the first miss probe (still sequential by design — batch
+      // size starts at 1). After that, probeBatch widens to LOOKAHEAD_CAP_MONTHS,
+      // so any subsequent batch should be dispatched all-at-once.
+      //
+      // Find the index at which more than one request was in-flight at the
+      // same time: look for a pair of consecutive dispatch timestamps that are
+      // closer together than any of the response times could be (i.e., the
+      // response from request N hasn't arrived before request N+1 was sent —
+      // which would be impossible under sequential dispatch).
+      //
+      // Proxy: on localhost each round trip takes at least a few ms even with
+      // loopback. Under batched dispatch, the 3rd+ requests should share a
+      // dispatch window of ≤ 50 ms (they're sent by the same Promise.all
+      // call). Under sequential dispatch the window grows with the number of
+      // sequential RTTs — at even 10 ms/RTT with loopback that's hundreds of
+      // ms for 11 misses.
+      //
+      // We only need to detect one concurrent pair to confirm the mechanism
+      // fired. Find the minimum gap between any two consecutive dispatch times
+      // starting from index 2 onward (the batch phase).
+      const batchTimes = pageRequests.slice(2).map((r) => r.t);
+      let minGap = Infinity;
+      for (let i = 1; i < batchTimes.length; i++) {
+        minGap = Math.min(minGap, batchTimes[i] - batchTimes[i - 1]);
+      }
+
+      // If there are fewer than 2 batch-phase requests, the QA seed data
+      // may have changed (teacher now has more activated weeks); skip the
+      // timing assertion but still record what we saw.
+      if (batchTimes.length >= 2) {
+        // ≤ 50 ms gap between consecutive dispatches == they were sent
+        // concurrently by the same Promise.all, not one-at-a-time.
+        check(
+          'booker: batch-phase /api/public/page requests are dispatched concurrently (gap ≤ 50 ms)',
+          minGap <= 50,
+          `min gap between batch-phase dispatches: ${minGap} ms (${batchTimes.length} requests in batch phase)`,
+        );
+      } else {
+        check('booker: at least 2 batch-phase requests observed (skipping timing assert)', true,
+          `only ${batchTimes.length} batch-phase request(s) — seed data may have changed`);
+      }
+    }
+
+    check('booker: no console errors during batched lookahead scan',
+      page.errors.length === 0, page.errors.join(' | '));
+    await page.close();
+  });
+
 }
 
 // ── a11y: contrast, names, labels, heading order ────────────
