@@ -1499,10 +1499,11 @@ async function runFlows() {
     await page.close();
   });
 
-  // 29. Admin month cells list each timeslot as a named card (time + student)
-  // instead of a colour dot. Every day box in the month shares one height so
-  // the grid still reads as a calendar; on a phone the end time hides and
-  // the page must not scroll sideways.
+  // 29. Admin month cells list each timeslot as a named, one-line card whose
+  // background colour carries the status (green = free, near-black =
+  // booked, brass/brown = blocked) instead of a colour dot or a two-line
+  // time range. Every day box in the month shares one height so the grid
+  // still reads as a calendar, and the page must not scroll sideways.
   await flow(29, async () => {
     const page = await newPage({ width: 1100 });
     await signIn(page);
@@ -1519,9 +1520,51 @@ async function runFlows() {
       bookedTexts.some((t) => /\d{2}:\d{2}/.test(t) && t.replace(/\d{2}:\d{2}|[–\-:]/g, '').trim().length > 1),
       bookedTexts[0] || '(none)');
 
-    const wideHasEnd = await page.$eval('#admin-calendar .calendar-day__slot-end', (el) =>
-      getComputedStyle(el).display !== 'none');
-    check('admin: desktop slot cards show the end time', wideHasEnd);
+    const nameWraps = await page.$$eval('#admin-calendar .calendar-day__slot-name', (els) =>
+      els.some((e) => e.getClientRects().length > 1));
+    check('admin: slot name never wraps to a second line', !nameWraps);
+
+    const rowHeights = await page.$$eval('#admin-calendar .calendar-day__slot', (els) =>
+      els.map((e) => Math.round(e.getBoundingClientRect().height)));
+    check('admin: slot cards render as a single compact row',
+      rowHeights.length > 0 && rowHeights.every((h) => h <= 22), rowHeights.join(','));
+
+    // Seed data may not include a blocked slot in the currently loaded
+    // month — add one through the real add-slot form (an unusual time,
+    // to avoid colliding with an existing slot) so the colour check below
+    // has something to find.
+    if ((await page.$$('#admin-calendar .calendar-day__slot--blocked')).length === 0) {
+      await page.click(OPEN_ADMIN_SLOT);
+      await page.waitForSelector('.modal-overlay:not(.hidden) .section__title', { timeout: 8000 });
+      await page.click('.modal-overlay:not(.hidden) .section__title');
+      await page.waitForSelector('.modal-overlay:not(.hidden) #add-slot-time', { timeout: 5000 });
+      await page.evaluate(() => {
+        const t = document.querySelector('.modal-overlay:not(.hidden) #add-slot-time');
+        t.value = '23:15';
+        t.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      await page.click('.modal-overlay:not(.hidden) #add-slot-blocked');
+      await page.click('.modal-overlay:not(.hidden) form button[type="submit"]');
+      await wait(600);
+      await page.evaluate(() => document.querySelector('.modal-overlay:not(.hidden) .modal__close')?.click());
+      await wait(300);
+    }
+
+    const slotBg = await page.evaluate(() => {
+      const bg = (cls) => {
+        const el = document.querySelector(`#admin-calendar .calendar-day__slot--${cls}`);
+        return el ? getComputedStyle(el).backgroundColor : null;
+      };
+      return { free: bg('free'), booked: bg('booked'), blocked: bg('blocked') };
+    });
+    const rgb = (s) => { const m = (s || '').match(/\d+/g); return m ? m.slice(0, 3).map(Number) : null; };
+    const free = rgb(slotBg.free), booked = rgb(slotBg.booked), blocked = rgb(slotBg.blocked);
+    check('admin: free slot card background reads as green',
+      !!free && free[1] > free[0] && free[1] > free[2], slotBg.free);
+    check('admin: booked slot card background reads as near-black',
+      !!booked && booked.every((c) => c < 40), slotBg.booked);
+    check('admin: blocked slot card background reads as brass/brown',
+      !!blocked && blocked[0] > blocked[1] && blocked[1] > blocked[2], slotBg.blocked);
 
     const heights = await page.$$eval('#admin-calendar .calendar-month:first-of-type .calendar-day', (els) =>
       els.map((e) => Math.round(e.getBoundingClientRect().height)));
@@ -1531,10 +1574,6 @@ async function runFlows() {
 
     await page.setViewport({ width: 375, height: 800, deviceScaleFactor: 1 });
     await wait(300);
-
-    const endHidden = await page.$eval('#admin-calendar .calendar-day__slot-end', (el) =>
-      getComputedStyle(el).display === 'none');
-    check('admin: phone slot cards hide the end time', endHidden);
 
     const phoneHeights = await page.$$eval('#admin-calendar .calendar-month:first-of-type .calendar-day', (els) =>
       els.map((e) => Math.round(e.getBoundingClientRect().height)));

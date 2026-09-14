@@ -1113,18 +1113,20 @@ input[type="checkbox"], input[type="radio"] {
   width: 100%;
   min-width: 0;
 }
+/* One line per slot: status is carried entirely by the card's background
+   colour (free = green, booked = charcoal/black, blocked = brass/brown),
+   consistent whatever day cell it sits in — including the selected day's
+   own dark fill, so no separate "selected" override is needed here. */
 #admin-calendar .calendar-day__slot {
   display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 0;
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
   width: 100%;
   min-width: 0;
   margin: 0;
   padding: 2px 4px;
-  background: var(--surface-card);
-  border: var(--border-w) solid var(--border);
-  color: var(--text);
+  border: var(--border-w) solid transparent;
   font-family: inherit;
   font-size: 11px;
   line-height: 1.25;
@@ -1141,34 +1143,38 @@ input[type="checkbox"], input[type="radio"] {
   outline-offset: -2px;
 }
 #admin-calendar .calendar-day__slot-time {
-  color: var(--text2);
+  flex: none;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  opacity: 0.85;
 }
 #admin-calendar .calendar-day__slot-name {
+  flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 #admin-calendar .calendar-day__slot--free {
-  background: var(--surface-success);
-  border-color: var(--border-success);
+  background: var(--color-success);
+  border-color: var(--color-success);
+  color: var(--text-on-dark);
 }
 #admin-calendar .calendar-day__slot--booked {
-  border-color: var(--primary);
+  /* A light border, not just the fill, so a booked card stays visible when
+     the day cell itself is selected (also filled with --primary). */
+  background: var(--primary);
+  border-color: var(--text-on-dark);
+  color: var(--text-on-dark);
 }
 #admin-calendar .calendar-day__slot--booked .calendar-day__slot-name { font-weight: 500; }
 #admin-calendar .calendar-day__slot--blocked {
-  background: var(--surface-alt);
-  color: var(--text2);
-}
-#admin-calendar .calendar-day[aria-current="true"] .calendar-day__slot,
-#admin-calendar .calendar-day.is-selected .calendar-day__slot {
-  /* Keep cards cream on the selected (dark) day so names stay readable. */
-  background: var(--surface-card);
-  color: var(--text);
+  /* --accent (brass) only clears 3.32:1 against --text-on-dark — readable
+     as a border/icon colour but not as a small-text fill. --accent-text-hover
+     is the same hue darkened for exactly this pairing (6.56:1), which also
+     keeps blocked consistent with the other two states' light-on-dark text. */
+  background: var(--accent-text-hover);
+  border-color: var(--accent-text-hover);
+  color: var(--text-on-dark);
 }
 
 @media (max-width: 899px) {
@@ -1176,8 +1182,6 @@ input[type="checkbox"], input[type="radio"] {
     --admin-day-chrome: 38px;
     --admin-slot-row: 36px;
   }
-  /* "09:00–10:00" does not fit a ~45px phone cell; start time is enough. */
-  #admin-calendar .calendar-day__slot-end { display: none; }
   #admin-calendar .calendar-day__slot-time { font-size: 10px; }
 }
 

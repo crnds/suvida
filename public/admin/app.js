@@ -689,6 +689,8 @@ function cellFnFor(monthStr, dateStr) {
     for (const slot of slots) {
       const nameText = slotCardLabel(slot);
       const timeLabel = fmtTime(slot.start_unix);
+      // One line per slot: status is carried by the card's background colour
+      // (free/booked/blocked), so the row only needs the start time and name.
       const card = UI.el('button', {
         class: `calendar-day__slot calendar-day__slot--${slot.kind}`,
         attrs: {
@@ -698,10 +700,7 @@ function cellFnFor(monthStr, dateStr) {
           'aria-label': `${timeLabel} ${nameText}`,
         },
       }, [
-        UI.el('span', { class: 'calendar-day__slot-time tabular-nums' }, [
-          UI.el('span', { class: 'calendar-day__slot-start', text: timeLabel }),
-          UI.el('span', { class: 'calendar-day__slot-end', text: `–${fmtTime(slot.start_unix + 3600)}` }),
-        ]),
+        UI.el('span', { class: 'calendar-day__slot-time tabular-nums', text: timeLabel }),
         UI.el('span', { class: 'calendar-day__slot-name', text: nameText }),
       ]);
       card.addEventListener('click', (e) => {
