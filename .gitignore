@@ -11,3 +11,4 @@ node_modules/
 # plan.md's directory layout both point at it.
 !.env.example
 qa-shots/
+.claude/scheduled_tasks.lock
