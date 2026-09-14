@@ -10,8 +10,8 @@ const STATE = {
   activeTab: 'schedule',
   template: [],
   weeks: [],
-  // monthStr -> { total, free, booked, blocked } per day, for every month
-  // currently rendered in the stack.
+  // monthStr -> { days, maxSlots } for every month currently rendered in the
+  // stack. days[date] is { total, free, booked, blocked, slots }.
   monthsData: new Map(),
   pollTimer: null,
   sessionUnreadIds: new Set(),
@@ -22,8 +22,8 @@ const STATE = {
   locations: [],
   calendarLocationFilter: null,
   unreadCount: 0,
-  // The open day panel, so nested modals can refresh it after they close.
-  dayPanel: null,
+  // The open timeslot panel, so nested modals can refresh it after they close.
+  slotPanel: null,
   // Overlapping log loads (filter changes, "Load more") must not merge.
   logToken: 0,
   notifications: [],
@@ -659,60 +659,59 @@ function setCalendarLocationFilter(id) {
 const adminCal = createMonthStack(els.adminCalendar, {
   loadMonth: loadMonthData,
   cellFn: cellFnFor,
-  onDayClick: (dateStr) => openDayPanel(dateStr),
+  dayAsContainer: true,
+  onMonthBuilt: stampMonthSlotCount,
 });
 
 // Mirrors BULK_MAX_WEEKS in api/_routes/admin/weeks.js and the input's max.
 const BULK_MAX_WEEKS = 26;
 
-const MAX_SLOT_DOTS = 12;
+function stampMonthSlotCount(monthStr, { grid }) {
+  const maxSlots = STATE.monthsData.get(monthStr)?.maxSlots || 0;
+  grid.style.setProperty('--slot-count', String(maxSlots));
+}
+
+function slotCardLabel(slot) {
+  if (slot.kind === 'booked' && slot.booker_name) return slot.booker_name;
+  return I18N.t(slot.kind === 'blocked' ? 'day_panel_slot_blocked' : 'day_panel_slot_free');
+}
 
 // Unlike the booker, admin sees every slot, so all three states are real:
 // free (some bookable), full (slots exist, none bookable), closed (no slots).
 function cellFnFor(monthStr, dateStr) {
   const day = STATE.monthsData.get(monthStr)?.days?.[dateStr];
-  const wrap = document.createElement('div');
-  wrap.className = 'calendar-day__info';
-
-  const counts = document.createElement('div');
-  counts.className = 'calendar-day__counts';
+  const wrap = UI.el('div', { class: 'calendar-day__info' });
   const labels = [];
-  const addCount = (kind, n) => {
-    if (!n) return;
-    const text = I18N.t(`calendar_count_${kind}`, { n });
-    const span = document.createElement('span');
-    span.className = `calendar-day__count calendar-day__count--${kind}`;
-    span.textContent = text;
-    counts.appendChild(span);
-    labels.push(text);
-  };
-  if (day) {
-    addCount('free', day.free);
-    addCount('booked', day.booked);
-    addCount('blocked', day.blocked);
-  }
-  wrap.appendChild(counts);
+  const slots = day?.slots || [];
 
-  // One dot per slot (free first, then booked, then blocked), capped so a
-  // fully-booked day can't overflow the card.
-  if (day && day.total > 0) {
-    const dots = document.createElement('div');
-    dots.className = 'calendar-day__dots';
-    dots.setAttribute('aria-hidden', 'true');
-    let remaining = MAX_SLOT_DOTS;
-    const addDots = (kind, n) => {
-      const show = Math.min(n || 0, remaining);
-      for (let i = 0; i < show; i++) {
-        const dot = document.createElement('span');
-        dot.className = `calendar-day__dot calendar-day__dot--${kind}`;
-        dots.appendChild(dot);
-      }
-      remaining -= show;
-    };
-    addDots('free', day.free);
-    addDots('booked', day.booked);
-    addDots('blocked', day.blocked);
-    wrap.appendChild(dots);
+  if (slots.length) {
+    const list = UI.el('div', { class: 'calendar-day__slot-list' });
+    for (const slot of slots) {
+      const nameText = slotCardLabel(slot);
+      const timeLabel = fmtTime(slot.start_unix);
+      const card = UI.el('button', {
+        class: `calendar-day__slot calendar-day__slot--${slot.kind}`,
+        attrs: {
+          type: 'button',
+          tabindex: '-1',
+          'data-slot-start': String(slot.start_unix),
+          'aria-label': `${timeLabel} ${nameText}`,
+        },
+      }, [
+        UI.el('span', { class: 'calendar-day__slot-time tabular-nums' }, [
+          UI.el('span', { class: 'calendar-day__slot-start', text: timeLabel }),
+          UI.el('span', { class: 'calendar-day__slot-end', text: `–${fmtTime(slot.start_unix + 3600)}` }),
+        ]),
+        UI.el('span', { class: 'calendar-day__slot-name', text: nameText }),
+      ]);
+      card.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openSlotPanel(dateStr, slot.start_unix);
+      });
+      list.appendChild(card);
+      labels.push(`${timeLabel} ${nameText}`);
+    }
+    wrap.appendChild(list);
   }
 
   // Blocked-only days are closed, not full — "full" means booked out.
@@ -728,74 +727,90 @@ function cellFnFor(monthStr, dateStr) {
 // month that doesn't.
 async function loadMonthData(monthStr) {
   const data = await Api.adminSlotsMonth(monthStr, STATE.calendarLocationFilter);
-  STATE.monthsData.set(monthStr, { days: data.days || {} });
+  const days = data.days || {};
+  let maxSlots = 0;
+  for (const day of Object.values(days)) {
+    const n = Array.isArray(day.slots) ? day.slots.length : (day.total || 0);
+    if (n > maxSlots) maxSlots = n;
+  }
+  STATE.monthsData.set(monthStr, { days, maxSlots });
   // Flagged here, not in cellFnFor — the i18n listener re-renders on every
   // language toggle, so setting it there marked the tab loaded before any fetch
   // and setTab('calendar') then skipped loading forever.
   els.adminCalendar.dataset.loaded = '1';
-  const total = Object.values(data.days || {}).reduce((sum, d) => sum + (d?.total || 0), 0);
+  const total = Object.values(days).reduce((sum, d) => sum + (d?.total || 0), 0);
   return { hasSlots: total > 0 };
 }
 
-// ── Day panel ──────────────────────────────────────────────
+// ── Timeslot panel ───────────────────────────────────────────
 
-async function openDayPanel(dateStr) {
+function slotPanelTitle(dateStr, startUnix) {
+  const timeRange = `${fmtTime(startUnix)}–${fmtTime(startUnix + 3600)}`;
+  return I18N.t('slot_panel_title', { date: fmtWeekdayDate(dateStr), time: timeRange });
+}
+
+async function openSlotPanel(dateStr, startUnix) {
   adminCal.setSelected(dateStr);
   const body = UI.el('div', { class: 'stack' }, [UI.loadingRow()]);
-  const handle = showModal(I18N.t('day_panel_title', { date: fmtWeekdayDate(dateStr) }), body, {
+  const handle = showModal(slotPanelTitle(dateStr, startUnix), body, {
     onClose: () => {
       adminCal.setSelected(null);
       // Clearing this is what stops refreshAfterDayAction() from firing at a
       // closed panel. It was never nulled, so `if (panel)` was true forever
-      // after the first day panel had ever been opened: every later action
-      // fetched a day nobody was looking at and painted into a detached node
+      // after the first panel had ever been opened: every later action
+      // fetched a slot nobody was looking at and painted into a detached node
       // — and the whole subtree, with every closure over its slots, leaked
       // for the lifetime of the page.
-      STATE.dayPanel = null;
+      STATE.slotPanel = null;
     },
   });
   // Held so a nested modal (book / edit / move) can refresh this panel after
   // it closes. Safe now that showModal stacks instead of wiping #modal-root:
   // the panel node stays in the document while the child is on top, where it
   // used to be detached and every later refresh painted into an orphan.
-  STATE.dayPanel = { body, dateStr, handle, token: 0 };
-  await refreshDayPanel(body, dateStr);
+  STATE.slotPanel = { body, dateStr, startUnix, handle, token: 0 };
+  await refreshSlotPanel();
 }
 
-async function refreshDayPanel(body, dateStr) {
-  const panel = STATE.dayPanel;
-  // Newest-request-wins, matching loadMonth/loadCalendarMonth. The booker's
-  // day sheet already guarded with handle.isOpen(); this one captured a
-  // handle and never used it, so tapping day 5, closing, then tapping day 12
-  // could let the day-5 response paint over day 12.
-  const token = panel ? ++panel.token : 0;
+async function refreshSlotPanel() {
+  const panel = STATE.slotPanel;
+  if (!panel) return;
+  // Newest-request-wins, matching loadMonth. The booker's day sheet already
+  // guarded with handle.isOpen(); this one captured a handle and never used
+  // it, so tapping slot A, closing, then tapping slot B could let the A
+  // response paint over B.
+  const token = ++panel.token;
   try {
-    const data = await Api.adminSlotsDay(dateStr, STATE.calendarLocationFilter);
-    if (panel && (panel !== STATE.dayPanel || token !== panel.token || !panel.handle.isOpen())) return;
-    renderDayPanel(body, dateStr, data.slots || []);
+    const data = await Api.adminSlotsDay(panel.dateStr, STATE.calendarLocationFilter);
+    if (panel !== STATE.slotPanel || token !== panel.token || !panel.handle.isOpen()) return;
+    const slots = data.slots || [];
+    const slot = slots.find((s) => Number(s.start_unix) === Number(panel.startUnix));
+    if (!slot) {
+      panel.handle.close();
+      return;
+    }
+    renderSlotPanel(panel.body, panel.dateStr, slot, slots);
   } catch (err) {
-    if (panel && (panel !== STATE.dayPanel || token !== panel.token || !panel.handle.isOpen())) return;
-    body.replaceChildren(UI.banner(messageForError(err), 'error'));
+    if (panel !== STATE.slotPanel || token !== panel.token || !panel.handle.isOpen()) return;
+    panel.body.replaceChildren(UI.banner(messageForError(err), 'error'));
   }
 }
 
-// Refreshes the day panel and the month behind it after any slot/booking
-// change, from wherever that change was made.
+// Refreshes the open timeslot panel and the month behind it after any
+// slot/booking change, from wherever that change was made.
 async function refreshAfterDayAction() {
-  const panel = STATE.dayPanel;
-  if (panel && panel.handle.isOpen()) await refreshDayPanel(panel.body, panel.dateStr);
+  const panel = STATE.slotPanel;
+  if (panel && panel.handle.isOpen()) await refreshSlotPanel();
   if (panel) adminCal.refreshMonth(panel.dateStr.slice(0, 7));
 }
 
-function renderDayPanel(body, dateStr, slots) {
-  const list = UI.el('div', { class: 'list' });
-  if (slots.length === 0) {
-    list.appendChild(UI.emptyState({ icon: 'calendar-xmark', text: I18N.t('day_panel_empty') }));
-  }
-  slots.forEach((slot) => list.appendChild(renderSlotRow(dateStr, slot, slots)));
+function renderSlotPanel(body, dateStr, slot, allSlots) {
+  const list = UI.el('div', { class: 'list' }, [
+    renderSlotRow(dateStr, slot, allSlots),
+  ]);
 
-  // The add-slot form is secondary to reviewing the day, so it sits behind a
-  // disclosure instead of competing with the slot list for attention.
+  // Add-slot stays available from the slot sheet so teachers can still
+  // override the template without a separate day-level modal.
   const addForm = buildAddSlotForm(dateStr);
   const details = UI.el('details', { class: 'section' }, [
     UI.el('summary', { class: 'section__title' }, [
@@ -1194,7 +1209,7 @@ function renderNotifications(notifications) {
       label: I18N.t('notif_go_to_day'),
       onClick: () => {
         setTab('calendar');
-        adminCal.revealMonth(n.day.slice(0, 7)).then(() => openDayPanel(n.day));
+        adminCal.revealMonth(n.day.slice(0, 7)).then(() => openSlotPanel(n.day, n.slot_unix));
       },
     });
 

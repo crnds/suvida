@@ -1072,6 +1072,115 @@ input[type="checkbox"], input[type="radio"] {
 /* Inset, because half the 6px grid gap is less than the theme's 2px offset. */
 .calendar-day:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 
+/* Admin month view: each timeslot is a named card, not a colour dot.
+   --slot-count is stamped on the month grid (busiest day in that month) so
+   every day box — empty, past, and busy — shares one height. */
+#admin-calendar .calendar-grid {
+  /* Stacked card: time on its own line so the name can use the full cell
+     width. A 7-column month is ~125px/cell even at the 960px app-shell, and
+     a one-line "09:00–10:00 Name" left ~40px for the name. */
+  --admin-day-chrome: 42px;
+  --admin-slot-row: 36px;
+  grid-template-rows: auto;
+  grid-auto-rows: minmax(calc(var(--admin-day-chrome) + var(--slot-count, 0) * var(--admin-slot-row)), auto);
+}
+#admin-calendar .calendar-day,
+#admin-calendar .calendar-day-blank {
+  min-height: calc(var(--admin-day-chrome) + var(--slot-count, 0) * var(--admin-slot-row));
+}
+#admin-calendar .calendar-day {
+  align-items: stretch;
+  padding: var(--space-icon) 3px;
+  gap: 4px;
+  cursor: default;
+}
+#admin-calendar .calendar-day__num {
+  text-align: center;
+  width: 100%;
+  flex: none;
+}
+#admin-calendar .calendar-day__info {
+  align-items: stretch;
+  width: 100%;
+  min-width: 0;
+  flex: 1;
+  gap: 2px;
+}
+#admin-calendar .calendar-day__slot-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+}
+#admin-calendar .calendar-day__slot {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 2px 4px;
+  background: var(--surface-card);
+  border: var(--border-w) solid var(--border);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 1.25;
+  text-align: left;
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+}
+#admin-calendar .calendar-day__slot:hover {
+  border-color: var(--primary);
+}
+#admin-calendar .calendar-day__slot:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+#admin-calendar .calendar-day__slot-time {
+  color: var(--text2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#admin-calendar .calendar-day__slot-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#admin-calendar .calendar-day__slot--free {
+  background: var(--surface-success);
+  border-color: var(--border-success);
+}
+#admin-calendar .calendar-day__slot--booked {
+  border-color: var(--primary);
+}
+#admin-calendar .calendar-day__slot--booked .calendar-day__slot-name { font-weight: 500; }
+#admin-calendar .calendar-day__slot--blocked {
+  background: var(--surface-alt);
+  color: var(--text2);
+}
+#admin-calendar .calendar-day[aria-current="true"] .calendar-day__slot,
+#admin-calendar .calendar-day.is-selected .calendar-day__slot {
+  /* Keep cards cream on the selected (dark) day so names stay readable. */
+  background: var(--surface-card);
+  color: var(--text);
+}
+
+@media (max-width: 899px) {
+  #admin-calendar .calendar-grid {
+    --admin-day-chrome: 38px;
+    --admin-slot-row: 36px;
+  }
+  /* "09:00–10:00" does not fit a ~45px phone cell; start time is enough. */
+  #admin-calendar .calendar-day__slot-end { display: none; }
+  #admin-calendar .calendar-day__slot-time { font-size: 10px; }
+}
+
 /* ── Modal ──────────────────────────────────────────────── */
 
 /* Stops the page behind the overlay from scrolling under the sheet — the
@@ -1335,6 +1444,8 @@ body.is-modal-open { overflow: hidden; }
   .calendar-grid { gap: 4px; }
   .calendar-day { padding: 6px 1px; min-height: 62px; }
   .calendar-day__num { font-size: 15px; }
+  /* Admin day height is driven by --slot-count, not the 62px booker floor. */
+  #admin-calendar .calendar-day { padding: 6px 2px; min-height: calc(var(--admin-day-chrome) + var(--slot-count, 0) * var(--admin-slot-row)); }
   /* Below ~360px a cell is ~41px wide; the availability label clips inside
      `overflow: hidden`, so show the dots alone and leave the count to the
      day's aria-label. */

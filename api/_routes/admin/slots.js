@@ -67,21 +67,26 @@ export async function listSlots(req, res) {
       return;
     }
     const result = await db.execute({
-      sql: `SELECT s.start_unix, s.blocked, b.id AS booking_id
+      sql: `SELECT s.start_unix, s.blocked, b.id AS booking_id, b.booker_name
               FROM slots s
               LEFT JOIN bookings b ON b.slot_id = s.id AND b.cancelled_at IS NULL
              WHERE s.admin_id = ? AND s.start_unix >= ? AND s.start_unix < ?
-               AND (? IS NULL OR s.location_id = ?)`,
+               AND (? IS NULL OR s.location_id = ?)
+             ORDER BY s.start_unix`,
       args: [req.adminId, start, end, locationId, locationId],
     });
     const days = {};
     for (const r of result.rows) {
       const dateStr = bangkokDateString(r.start_unix);
-      const day = (days[dateStr] ??= { total: 0, free: 0, booked: 0, blocked: 0 });
+      const day = (days[dateStr] ??= { total: 0, free: 0, booked: 0, blocked: 0, slots: [] });
+      const kind = r.booking_id ? 'booked' : (r.blocked ? 'blocked' : 'free');
       day.total += 1;
-      if (r.booking_id) day.booked += 1;
-      else if (r.blocked) day.blocked += 1;
-      else day.free += 1;
+      day[kind] += 1;
+      day.slots.push({
+        start_unix: r.start_unix,
+        kind,
+        booker_name: kind === 'booked' ? r.booker_name : null,
+      });
     }
     res.status(200).json({ days });
     return;

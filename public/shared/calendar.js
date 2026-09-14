@@ -53,6 +53,10 @@ const ARROW_DELTA = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7 };
 //   loadMonth(monthStr) -> Promise<{ hasSlots }>  fetch + cache one month
 //   cellFn(monthStr, dateStr) -> { node, disabled, state, aria }, all optional
 //   onDayClick(dateStr)
+//   dayAsContainer: if true, the gridcell is a <div> so cellFn can put real
+//     <button>s inside (admin slot cards). Booker keeps a <button> cell.
+//   onMonthBuilt(monthStr, { section, grid })  optional; after first paint
+//     and after refreshMonth, so a caller can stamp month-level CSS vars
 // }
 function createMonthStack(container, handlers) {
   container.classList.add('calendar-stack');
@@ -172,17 +176,33 @@ function createMonthStack(container, handlers) {
     for (let day = 1; day <= numDays; day++) {
       const dateStr = `${y}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 
-      const btn = document.createElement('button');
-      btn.type = 'button';
+      // Admin slot cards are real buttons, so the cell cannot be a <button>
+      // (nested buttons are invalid HTML and the inner click never fires).
+      const btn = handlers.dayAsContainer
+        ? document.createElement('div')
+        : document.createElement('button');
+      if (!handlers.dayAsContainer) btn.type = 'button';
       btn.setAttribute('role', 'gridcell');
       btn.dataset.date = dateStr;
       btn.setAttribute('tabindex', '-1');
       // Attached unconditionally — unavailable cells stay in the focus order
       // (aria-disabled, not disabled), so the guard has to live here.
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', (e) => {
         if (btn.getAttribute('aria-disabled') === 'true') return;
-        handlers.onDayClick(dateStr);
+        if (handlers.dayAsContainer && e.target.closest('button')) return;
+        if (handlers.onDayClick) handlers.onDayClick(dateStr);
       });
+      if (handlers.dayAsContainer) {
+        btn.addEventListener('keydown', (e) => {
+          if (e.key !== 'Enter' && e.key !== ' ') return;
+          if (e.target !== btn) return;
+          if (btn.getAttribute('aria-disabled') === 'true') return;
+          e.preventDefault();
+          const slotBtn = btn.querySelector('.calendar-day__slot');
+          if (slotBtn) slotBtn.click();
+          else if (handlers.onDayClick) handlers.onDayClick(dateStr);
+        });
+      }
 
       cells.set(dateStr, btn);
       paintCell(btn, monthStr, dateStr);
@@ -220,6 +240,7 @@ function createMonthStack(container, handlers) {
     }
 
     monthSections.set(monthStr, { section, grid });
+    handlers.onMonthBuilt?.(monthStr, { section, grid });
     return section;
   }
 
@@ -393,6 +414,8 @@ function createMonthStack(container, handlers) {
       const btn = cells.get(dateStr);
       if (btn) paintCell(btn, monthStr, dateStr);
     }
+    const entry = monthSections.get(monthStr);
+    if (entry) handlers.onMonthBuilt?.(monthStr, entry);
   }
 
   // Grows the stack (same skip-empty loop as scroll) until monthStr is

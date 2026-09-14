@@ -1243,6 +1243,54 @@ async function test32() {
     withBadParam.status === 200, JSON.stringify(withBadParam.json));
 }
 
+// ── Test 33: admin month payload includes per-slot time + student ──
+// The admin calendar paints each timeslot as a card (time range + name)
+// instead of a colour dot, so the month endpoint has to return the slots
+// themselves — counts alone cannot render "15:00 Alice". Phone stays off
+// this payload; the day panel is still the place that shows it.
+
+async function test33() {
+  await resetRateLimits();
+  const admin = await createAdmin(`smoke_slots_${RUN_ID}`, 'Month Slots Teacher', 'passwordS1');
+  const bookedUnix = unixFromBangkokDateTime(bangkokDateString(futureUnix(40 * 24)), 15 * 60);
+  const freeUnix = bookedUnix + 3600;
+  const blockedUnix = bookedUnix + 7200;
+  const bookedId = await addOverrideSlot(admin, bookedUnix);
+  await addOverrideSlot(admin, freeUnix);
+  await addOverrideSlot(admin, blockedUnix, true);
+  const book = await publicBook(admin.slug, bookedId, 'Alice Month', '0810000033');
+  assert('test33: setup booking succeeds', book.status === 201, JSON.stringify(book.json));
+
+  const dateStr = bangkokDateString(bookedUnix);
+  const monthStr = dateStr.slice(0, 7);
+  const res = await req('GET', '/api/admin/slots', { cookie: admin.cookie, query: { month: monthStr } });
+  assert('test33: month list returns 200', res.status === 200, JSON.stringify(res.json));
+  const day = res.json.days?.[dateStr];
+  assert('test33: day keeps count fields',
+    !!day && day.total === 3 && day.booked === 1 && day.free === 1 && day.blocked === 1,
+    JSON.stringify(day));
+  assert('test33: day.slots is an array of 3',
+    Array.isArray(day?.slots) && day.slots.length === 3,
+    JSON.stringify(day?.slots));
+  const byUnix = Object.fromEntries((day?.slots || []).map((s) => [s.start_unix, s]));
+  assert('test33: booked slot has kind=booked and booker_name',
+    byUnix[bookedUnix]?.kind === 'booked' && byUnix[bookedUnix]?.booker_name === 'Alice Month',
+    JSON.stringify(byUnix[bookedUnix]));
+  assert('test33: free slot has kind=free and no name',
+    byUnix[freeUnix]?.kind === 'free' && byUnix[freeUnix]?.booker_name == null,
+    JSON.stringify(byUnix[freeUnix]));
+  assert('test33: blocked slot has kind=blocked and no name',
+    byUnix[blockedUnix]?.kind === 'blocked' && byUnix[blockedUnix]?.booker_name == null,
+    JSON.stringify(byUnix[blockedUnix]));
+  assert('test33: slots are ordered by start_unix',
+    Array.isArray(day?.slots) && day.slots.every((s, i, arr) => i === 0 || arr[i - 1].start_unix <= s.start_unix),
+    JSON.stringify(day?.slots?.map((s) => s.start_unix)));
+  const blob = JSON.stringify(day?.slots || []);
+  assert('test33: month slots omit booker_phone',
+    !blob.includes('0810000033') && !(day?.slots || []).some((s) => Object.prototype.hasOwnProperty.call(s, 'booker_phone')),
+    blob);
+}
+
 async function main() {
   const purged = await purgePreviousRuns();
   if (purged.admins > 0) console.log(`(purged ${purged.admins} leftover smoke_* teacher(s) from previous runs)`);
@@ -1277,6 +1325,7 @@ async function main() {
   await group('Test 30 — HTTP contract + tenant cascade', test30);
   await group('Test 31 — template entry edit (PATCH)', test31);
   await group('Test 32 — public month location breakdown', test32);
+  await group('Test 33 — admin month slot cards payload', test33);
 
   const skipped = results.filter((r) => r.skipped);
   const graded = results.filter((r) => !r.skipped);

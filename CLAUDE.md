@@ -49,8 +49,8 @@ The full spec lives in two files at the project root — **read them before maki
   `refreshDayPanel()` paint into a detached node.
 - **Some class names are built by string concatenation and cannot be renamed
   by find-and-replace**: `calendar-day--${state}`, `calendar-day__dot--${kind}`,
-  `calendar-day__count--${kind}`, `status-chip--*`, `btn-${kind}`,
-  `toast--${kind}`, `banner--${kind}`.
+  `calendar-day__count--${kind}`, `calendar-day__slot--${kind}`,
+  `status-chip--*`, `btn-${kind}`, `toast--${kind}`, `banner--${kind}`.
 - **`.hidden` (`display: none !important`) is the only show/hide mechanism**, and
   selected state is styled from ARIA attributes (`[aria-selected]`,
   `[aria-pressed]`), never from a class.

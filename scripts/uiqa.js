@@ -72,6 +72,8 @@ if (!CHROME) {
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const OPEN_DAY = '.calendar-day:not([aria-disabled="true"])';
+const OPEN_ADMIN_BOOKED_SLOT = '#admin-calendar .calendar-day:not(.calendar-day--past) .calendar-day__slot--booked';
+const OPEN_ADMIN_SLOT = '#admin-calendar .calendar-day:not(.calendar-day--past) .calendar-day__slot';
 
 // The booker's tab bar lives in the nav drawer — open it before clicking a
 // tab. The drawer closes itself once a tab is picked.
@@ -387,11 +389,11 @@ async function runFlows() {
     const page = await newPage({ width: 1100 });
     await signIn(page);
     await page.goto(`${BASE}/admin/`, { waitUntil: 'networkidle2' });
-    await page.waitForSelector(OPEN_DAY, { timeout: 8000 });
+    await page.waitForSelector(OPEN_ADMIN_BOOKED_SLOT, { timeout: 8000 });
 
     let opened = false;
-    for (const day of await page.$$(OPEN_DAY)) {
-      await day.click();
+    for (const slot of await page.$$(OPEN_ADMIN_BOOKED_SLOT)) {
+      await slot.click();
       await page.waitForSelector('.modal .list', { timeout: 5000 });
       await wait(400);
       // Only a booked row carries the edit/move/cancel trio.
@@ -716,13 +718,13 @@ async function runFlows() {
     await signIn(page, 'admin');
     await page.goto(`${BASE}/admin/`, { waitUntil: 'networkidle2' });
     await wait(600);
-    await page.waitForSelector(OPEN_DAY, { timeout: 8000 });
+    await page.waitForSelector(OPEN_ADMIN_BOOKED_SLOT, { timeout: 8000 });
 
-    // Find a day that actually HAS a booking — only a booked row carries the
+    // Find a slot that actually HAS a booking — only a booked row carries the
     // edit/move/cancel trio this flow needs. Same search as flow 4.
     let opened = false;
-    for (const day of await page.$$(OPEN_DAY)) {
-      await day.click();
+    for (const slot of await page.$$(OPEN_ADMIN_BOOKED_SLOT)) {
+      await slot.click();
       await page.waitForSelector('.modal .list', { timeout: 5000 });
       await wait(400);
       if (await page.$('.modal .list-row .btn-destructive')) { opened = true; break; }
@@ -1497,6 +1499,75 @@ async function runFlows() {
     await page.close();
   });
 
+  // 29. Admin month cells list each timeslot as a named card (time + student)
+  // instead of a colour dot. Every day box in the month shares one height so
+  // the grid still reads as a calendar; on a phone the end time hides and
+  // the page must not scroll sideways.
+  await flow(29, async () => {
+    const page = await newPage({ width: 1100 });
+    await signIn(page);
+    await page.goto(`${BASE}/admin/`, { waitUntil: 'networkidle2' });
+    await page.waitForSelector('#admin-calendar .calendar-day', { timeout: 8000 });
+    await page.waitForSelector('#admin-calendar .calendar-day__slot', { timeout: 8000 });
+
+    check('admin: calendar no longer paints timeslot dots',
+      (await page.$$('#admin-calendar .calendar-day__dot')).length === 0);
+
+    const bookedTexts = await page.$$eval('#admin-calendar .calendar-day__slot--booked', (els) =>
+      els.map((e) => e.textContent.replace(/\s+/g, ' ').trim()));
+    check('admin: a booked slot card shows a time and a student name',
+      bookedTexts.some((t) => /\d{2}:\d{2}/.test(t) && t.replace(/\d{2}:\d{2}|[–\-:]/g, '').trim().length > 1),
+      bookedTexts[0] || '(none)');
+
+    const wideHasEnd = await page.$eval('#admin-calendar .calendar-day__slot-end', (el) =>
+      getComputedStyle(el).display !== 'none');
+    check('admin: desktop slot cards show the end time', wideHasEnd);
+
+    const heights = await page.$$eval('#admin-calendar .calendar-month:first-of-type .calendar-day', (els) =>
+      els.map((e) => Math.round(e.getBoundingClientRect().height)));
+    const unique = [...new Set(heights)];
+    check('admin: every day box in the month has the same height',
+      unique.length === 1, unique.join(','));
+
+    await page.setViewport({ width: 375, height: 800, deviceScaleFactor: 1 });
+    await wait(300);
+
+    const endHidden = await page.$eval('#admin-calendar .calendar-day__slot-end', (el) =>
+      getComputedStyle(el).display === 'none');
+    check('admin: phone slot cards hide the end time', endHidden);
+
+    const phoneHeights = await page.$$eval('#admin-calendar .calendar-month:first-of-type .calendar-day', (els) =>
+      els.map((e) => Math.round(e.getBoundingClientRect().height)));
+    const phoneUnique = [...new Set(phoneHeights)];
+    check('admin: phone day boxes in the month still share one height',
+      phoneUnique.length === 1, phoneUnique.join(','));
+
+    const overflowX = await page.evaluate(() =>
+      document.documentElement.scrollWidth > document.documentElement.clientWidth + 1);
+    check('admin: phone calendar does not scroll the page sideways', !overflowX);
+
+    await page.setViewport({ width: 1100, height: 900, deviceScaleFactor: 1 });
+    await wait(300);
+    await page.evaluate(() => {
+      document.querySelector('#admin-calendar .calendar-day:not([aria-disabled="true"]) .calendar-day__num')?.click();
+    });
+    await wait(300);
+    check('admin: clicking the day number does not open a modal',
+      (await page.$$('.modal-overlay:not(.hidden)')).length === 0);
+
+    await page.click(OPEN_ADMIN_SLOT);
+    await page.waitForSelector('.modal-overlay:not(.hidden) .list-row', { timeout: 8000 });
+    const slotRows = await page.$$eval('.modal-overlay:not(.hidden) .list-row', (n) => n.length);
+    const title = await page.$eval('.modal-overlay:not(.hidden) .modal__title', (n) => n.textContent);
+    check('admin: clicking a timeslot opens a single-slot modal', slotRows === 1, `rows=${slotRows}`);
+    check('admin: the slot modal title includes a time range',
+      /\d{2}:\d{2}/.test(title), title);
+
+    check('admin: no console errors on slot-card calendar',
+      page.errors.length === 0, page.errors.join(' | '));
+    await page.close();
+  });
+
 }
 
 // ── a11y: contrast, names, labels, heading order ────────────
@@ -1696,7 +1767,8 @@ async function runShots() {
     ownerlogin: () => shoot('ownerlogin', '/owner/', (p) => p.waitForSelector('#login-username', { visible: true }), { anon: true }),
     admincalendar: () => shoot('admincalendar', '/admin/', () => wait(400)),
     adminday: () => shoot('adminday', '/admin/', async (p) => {
-      await openDay(p);
+      await p.waitForSelector(OPEN_ADMIN_SLOT, { timeout: 8000 });
+      await p.click(OPEN_ADMIN_SLOT);
       await p.waitForSelector('.modal .list', { timeout: 5000 });
     }),
     adminschedule: () => shoot('adminschedule', '/admin/', async (p) => {
