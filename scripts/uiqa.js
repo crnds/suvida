@@ -1501,16 +1501,17 @@ async function runFlows() {
 
   // 29. Admin month cells list each timeslot as a named card (time + student)
   // instead of a colour dot. Every day box in the month shares one height so
-  // the grid still reads as a calendar. On a phone, only booked lessons keep
-  // a card (capped at PHONE_CARD_MAX) — free/blocked slots and any booked
-  // slot past the cap collapse into a "see all" dot row — so several week
-  // rows fit on one screen, and the page must not scroll sideways.
+  // the grid still reads as a calendar; on a phone the end time hides and
+  // the page must not scroll sideways.
   await flow(29, async () => {
     const page = await newPage({ width: 1100 });
     await signIn(page);
     await page.goto(`${BASE}/admin/`, { waitUntil: 'networkidle2' });
     await page.waitForSelector('#admin-calendar .calendar-day', { timeout: 8000 });
     await page.waitForSelector('#admin-calendar .calendar-day__slot', { timeout: 8000 });
+
+    check('admin: calendar no longer paints timeslot dots',
+      (await page.$$('#admin-calendar .calendar-day__dot')).length === 0);
 
     const bookedTexts = await page.$$eval('#admin-calendar .calendar-day__slot--booked', (els) =>
       els.map((e) => e.textContent.replace(/\s+/g, ' ').trim()));
@@ -1522,17 +1523,13 @@ async function runFlows() {
       getComputedStyle(el).display !== 'none');
     check('admin: desktop slot cards show the end time', wideHasEnd);
 
-    check('admin: desktop hides the phone "see all" dot row',
-      (await page.$$eval('#admin-calendar .calendar-day__more', (els) =>
-        els.every((e) => getComputedStyle(e).display === 'none'))));
-
     const heights = await page.$$eval('#admin-calendar .calendar-month:first-of-type .calendar-day', (els) =>
       els.map((e) => Math.round(e.getBoundingClientRect().height)));
     const unique = [...new Set(heights)];
     check('admin: every day box in the month has the same height',
       unique.length === 1, unique.join(','));
 
-    await page.setViewport({ width: 375, height: 900, deviceScaleFactor: 1 });
+    await page.setViewport({ width: 375, height: 800, deviceScaleFactor: 1 });
     await wait(300);
 
     const endHidden = await page.$eval('#admin-calendar .calendar-day__slot-end', (el) =>
@@ -1544,47 +1541,6 @@ async function runFlows() {
     const phoneUnique = [...new Set(phoneHeights)];
     check('admin: phone day boxes in the month still share one height',
       phoneUnique.length === 1, phoneUnique.join(','));
-    check('admin: phone day boxes are short enough to fit several rows on screen',
-      phoneHeights.every((h) => h <= 140), phoneHeights[0] ? String(phoneHeights[0]) : '(none)');
-
-    const visibleRows = await page.evaluate(() => {
-      const cells = [...document.querySelectorAll(
-        '#admin-calendar .calendar-month:first-of-type .calendar-day')];
-      return cells.filter((c) => c.getBoundingClientRect().bottom <= 900).length;
-    });
-    check('admin: at least 5 day cells fit within a 900px-tall phone screen',
-      visibleRows >= 5, String(visibleRows));
-
-    const moreCount = (await page.$$('#admin-calendar .calendar-day__more')).length;
-    check('admin: at least one day collapses extra slots behind "see all" on phone',
-      moreCount > 0, String(moreCount));
-
-    if (moreCount > 0) {
-      const moreVisible = await page.$$eval('#admin-calendar .calendar-day__more', (els) =>
-        els.some((e) => getComputedStyle(e).display !== 'none'));
-      check('admin: the "see all" dot row is visible on phone', moreVisible);
-
-      const hiddenCardsStayHidden = await page.$$eval(
-        '#admin-calendar .calendar-day__slot--compact-hide', (els) =>
-          els.length > 0 && els.every((e) => getComputedStyle(e).display === 'none'));
-      check('admin: collapsed slot cards are not painted on phone', hiddenCardsStayHidden);
-
-      await page.evaluate(() => {
-        const btn = [...document.querySelectorAll('#admin-calendar .calendar-day__more')]
-          .find((e) => getComputedStyle(e).display !== 'none');
-        btn?.click();
-      });
-      await page.waitForSelector('.modal-overlay:not(.hidden) .list-row', { timeout: 8000 });
-      const dayRows = await page.$$eval('.modal-overlay:not(.hidden) .list-row', (n) => n.length);
-      check('admin: "see all" opens a day sheet listing every slot for that day', dayRows > 1, `rows=${dayRows}`);
-      await page.evaluate(() => document.querySelector('.modal-overlay:not(.hidden) .modal__close')?.click());
-      await wait(200);
-    }
-
-    const filterScrollH = await page.$eval('#admin-location-filter', (el) => el.scrollHeight);
-    const chipH = await page.$eval('#admin-location-filter .chip', (el) => el.getBoundingClientRect().height).catch(() => 0);
-    check('admin: the phone location filter stays a single row (no wrap)',
-      chipH === 0 || filterScrollH <= chipH + 4, `scrollH=${filterScrollH} chipH=${chipH}`);
 
     const overflowX = await page.evaluate(() =>
       document.documentElement.scrollWidth > document.documentElement.clientWidth + 1);

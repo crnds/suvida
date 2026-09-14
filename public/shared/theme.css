@@ -1073,27 +1073,20 @@ input[type="checkbox"], input[type="radio"] {
 .calendar-day:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 
 /* Admin month view: each timeslot is a named card, not a colour dot.
-   --slot-count/--card-count/--dot-rows are stamped on the month grid (from
-   the busiest day in that month) so every day box — empty, past, and busy —
-   shares one height. Desktop sizes off --slot-count (every slot is a card);
-   the `max-width: 899px` block below switches the formula to --card-count
-   (booked cards only, capped) + --dot-rows (one fixed-height row for
-   whatever got collapsed to dots) so a busy month still fits several weeks
-   on one phone screen. */
+   --slot-count is stamped on the month grid (busiest day in that month) so
+   every day box — empty, past, and busy — shares one height. */
 #admin-calendar .calendar-grid {
   /* Stacked card: time on its own line so the name can use the full cell
      width. A 7-column month is ~125px/cell even at the 960px app-shell, and
      a one-line "09:00–10:00 Name" left ~40px for the name. */
   --admin-day-chrome: 42px;
   --admin-slot-row: 36px;
-  --admin-dot-row: 0px;
-  --admin-day-h: max(60px, calc(var(--admin-day-chrome) + var(--slot-count, 0) * var(--admin-slot-row) + var(--dot-rows, 0) * var(--admin-dot-row)));
   grid-template-rows: auto;
-  grid-auto-rows: minmax(var(--admin-day-h), auto);
+  grid-auto-rows: minmax(calc(var(--admin-day-chrome) + var(--slot-count, 0) * var(--admin-slot-row)), auto);
 }
 #admin-calendar .calendar-day,
 #admin-calendar .calendar-day-blank {
-  min-height: var(--admin-day-h);
+  min-height: calc(var(--admin-day-chrome) + var(--slot-count, 0) * var(--admin-slot-row));
 }
 #admin-calendar .calendar-day {
   align-items: stretch;
@@ -1119,22 +1112,6 @@ input[type="checkbox"], input[type="radio"] {
   gap: 2px;
   width: 100%;
   min-width: 0;
-}
-/* The phone "see all" trigger: a plain button wrapping the dot row so the
-   collapsed slots (free/blocked, and any booked slot past PHONE_CARD_MAX)
-   stay reachable. Hidden on desktop, where every slot already has a card. */
-#admin-calendar .calendar-day__more {
-  display: none;
-  width: 100%;
-  padding: 1px 0 0;
-  margin: 0;
-  background: none;
-  border: none;
-  cursor: pointer;
-}
-#admin-calendar .calendar-day__more:focus-visible {
-  outline: 2px solid var(--focus);
-  outline-offset: -2px;
 }
 #admin-calendar .calendar-day__slot {
   display: flex;
@@ -1197,35 +1174,11 @@ input[type="checkbox"], input[type="radio"] {
 @media (max-width: 899px) {
   #admin-calendar .calendar-grid {
     --admin-day-chrome: 38px;
-    --admin-slot-row: 28px;
-    --admin-dot-row: 14px;
-    /* Only booked lessons get a card on a phone; free/blocked slots and any
-       booked slot past PHONE_CARD_MAX collapse into the dot row below, so
-       the busiest day no longer sets every cell's height. */
-    --admin-day-h: max(60px, calc(var(--admin-day-chrome) + var(--card-count, 0) * var(--admin-slot-row) + var(--dot-rows, 0) * var(--admin-dot-row)));
+    --admin-slot-row: 36px;
   }
   /* "09:00–10:00" does not fit a ~45px phone cell; start time is enough. */
   #admin-calendar .calendar-day__slot-end { display: none; }
   #admin-calendar .calendar-day__slot-time { font-size: 10px; }
-  #admin-calendar .calendar-day__slot { padding: 1px 3px; font-size: 10px; line-height: 1.15; }
-  #admin-calendar .calendar-day__slot--compact-hide { display: none; }
-  #admin-calendar .calendar-day__more { display: block; }
-  /* The cell's aria-label already lists every slot, so the collapsed dots
-     stay a single fixed-height row rather than wrapping and growing the
-     cell back to full height. */
-  #admin-calendar .calendar-day__dots { flex-wrap: nowrap; overflow: hidden; }
-
-  /* Reclaim the space the legend and location filter cost above the grid —
-     each used to wrap onto two lines, which on a phone is worth almost a
-     whole extra week row. */
-  #tab-calendar > .row-wrap.text-caption { flex-wrap: nowrap; gap: var(--space-1); font-size: 11px; }
-  #admin-location-filter {
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    scrollbar-width: none;
-    -webkit-overflow-scrolling: touch;
-  }
-  #admin-location-filter::-webkit-scrollbar { display: none; }
 }
 
 /* ── Modal ──────────────────────────────────────────────── */
@@ -1491,8 +1444,8 @@ body.is-modal-open { overflow: hidden; }
   .calendar-grid { gap: 4px; }
   .calendar-day { padding: 6px 1px; min-height: 62px; }
   .calendar-day__num { font-size: 15px; }
-  /* Admin day height is driven by --admin-day-h, not the 62px booker floor. */
-  #admin-calendar .calendar-day { padding: 6px 2px; min-height: var(--admin-day-h); }
+  /* Admin day height is driven by --slot-count, not the 62px booker floor. */
+  #admin-calendar .calendar-day { padding: 6px 2px; min-height: calc(var(--admin-day-chrome) + var(--slot-count, 0) * var(--admin-slot-row)); }
   /* Below ~360px a cell is ~41px wide; the availability label clips inside
      `overflow: hidden`, so show the dots alone and leave the count to the
      day's aria-label. */
