@@ -10,8 +10,10 @@ const STATE = {
   activeTab: 'schedule',
   template: [],
   weeks: [],
-  // monthStr -> { days, maxSlots } for every month currently rendered in the
-  // stack. days[date] is { total, free, booked, blocked, slots }.
+  // monthStr -> { days, maxSlots, maxCards, hasDots } for every month
+  // currently rendered in the stack. days[date] is
+  // { total, free, booked, blocked, slots }. maxCards/hasDots drive the
+  // phone-compact cell height (see stampMonthSlotCount).
   monthsData: new Map(),
   pollTimer: null,
   sessionUnreadIds: new Set(),
@@ -24,6 +26,9 @@ const STATE = {
   unreadCount: 0,
   // The open timeslot panel, so nested modals can refresh it after they close.
   slotPanel: null,
+  // The open "see all slots today" sheet (phone compact view), refreshed
+  // alongside slotPanel after any booking change.
+  dayPanel: null,
   // Overlapping log loads (filter changes, "Load more") must not merge.
   logToken: 0,
   notifications: [],
@@ -666,9 +671,16 @@ const adminCal = createMonthStack(els.adminCalendar, {
 // Mirrors BULK_MAX_WEEKS in api/_routes/admin/weeks.js and the input's max.
 const BULK_MAX_WEEKS = 26;
 
+// Phones show at most this many booked-slot cards per day; everything else
+// (free, blocked, and booked beyond this) collapses into a dot row behind
+// the "see all" button — see cellFnFor and the `max-width: 899px` CSS block.
+const PHONE_CARD_MAX = 3;
+
 function stampMonthSlotCount(monthStr, { grid }) {
-  const maxSlots = STATE.monthsData.get(monthStr)?.maxSlots || 0;
-  grid.style.setProperty('--slot-count', String(maxSlots));
+  const entry = STATE.monthsData.get(monthStr);
+  grid.style.setProperty('--slot-count', String(entry?.maxSlots || 0));
+  grid.style.setProperty('--card-count', String(entry?.maxCards || 0));
+  grid.style.setProperty('--dot-rows', String(entry?.hasDots || 0));
 }
 
 function slotCardLabel(slot) {
@@ -686,11 +698,21 @@ function cellFnFor(monthStr, dateStr) {
 
   if (slots.length) {
     const list = UI.el('div', { class: 'calendar-day__slot-list' });
+    // Phones only have room for a few named cards — booked lessons are the
+    // ones worth reading, so free/blocked slots and any booked slot past the
+    // cap fall back to a dot in `dots`, opened via the day panel below.
+    const dots = UI.el('div', { class: 'calendar-day__dots', attrs: { 'aria-hidden': 'true' } });
+    let shownBooked = 0;
+    let hiddenCount = 0;
     for (const slot of slots) {
       const nameText = slotCardLabel(slot);
       const timeLabel = fmtTime(slot.start_unix);
+      const isBooked = slot.kind === 'booked';
+      const compactHide = !isBooked || shownBooked >= PHONE_CARD_MAX;
+      if (isBooked && !compactHide) shownBooked++;
+      if (compactHide) hiddenCount++;
       const card = UI.el('button', {
-        class: `calendar-day__slot calendar-day__slot--${slot.kind}`,
+        class: `calendar-day__slot calendar-day__slot--${slot.kind}${compactHide ? ' calendar-day__slot--compact-hide' : ''}`,
         attrs: {
           type: 'button',
           tabindex: '-1',
@@ -709,9 +731,21 @@ function cellFnFor(monthStr, dateStr) {
         openSlotPanel(dateStr, slot.start_unix);
       });
       list.appendChild(card);
+      if (compactHide) dots.appendChild(UI.el('span', { class: `calendar-day__dot calendar-day__dot--${slot.kind}` }));
       labels.push(`${timeLabel} ${nameText}`);
     }
     wrap.appendChild(list);
+    if (hiddenCount) {
+      const more = UI.el('button', {
+        class: 'calendar-day__more',
+        attrs: { type: 'button', tabindex: '-1', 'aria-label': I18N.t('calendar_more_slots', { n: slots.length }) },
+      }, [dots]);
+      more.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openDayPanel(dateStr);
+      });
+      wrap.appendChild(more);
+    }
   }
 
   // Blocked-only days are closed, not full — "full" means booked out.
@@ -729,11 +763,18 @@ async function loadMonthData(monthStr) {
   const data = await Api.adminSlotsMonth(monthStr, STATE.calendarLocationFilter);
   const days = data.days || {};
   let maxSlots = 0;
+  let maxCards = 0;
+  let hasDots = 0;
   for (const day of Object.values(days)) {
-    const n = Array.isArray(day.slots) ? day.slots.length : (day.total || 0);
+    const slots = Array.isArray(day.slots) ? day.slots : [];
+    const n = slots.length || (day.total || 0);
     if (n > maxSlots) maxSlots = n;
+    const bookedCount = slots.reduce((sum, s) => sum + (s.kind === 'booked' ? 1 : 0), 0);
+    const cards = Math.min(bookedCount, PHONE_CARD_MAX);
+    if (cards > maxCards) maxCards = cards;
+    if (slots.length > cards) hasDots = 1;
   }
-  STATE.monthsData.set(monthStr, { days, maxSlots });
+  STATE.monthsData.set(monthStr, { days, maxSlots, maxCards, hasDots });
   // Flagged here, not in cellFnFor — the i18n listener re-renders on every
   // language toggle, so setting it there marked the tab loaded before any fetch
   // and setTab('calendar') then skipped loading forever.
@@ -796,12 +837,54 @@ async function refreshSlotPanel() {
   }
 }
 
-// Refreshes the open timeslot panel and the month behind it after any
+// Refreshes whichever panel(s) are open — the single-slot panel and/or the
+// phone "see all" day panel — and the month behind them, after any
 // slot/booking change, from wherever that change was made.
 async function refreshAfterDayAction() {
-  const panel = STATE.slotPanel;
-  if (panel && panel.handle.isOpen()) await refreshSlotPanel();
-  if (panel) adminCal.refreshMonth(panel.dateStr.slice(0, 7));
+  const slotPanel = STATE.slotPanel;
+  if (slotPanel && slotPanel.handle.isOpen()) await refreshSlotPanel();
+  const dayPanel = STATE.dayPanel;
+  if (dayPanel && dayPanel.handle.isOpen()) await refreshDayPanel();
+  const dateStr = slotPanel?.dateStr || dayPanel?.dateStr;
+  if (dateStr) adminCal.refreshMonth(dateStr.slice(0, 7));
+}
+
+// ── Day panel ("see all slots today", phone compact view) ────
+
+async function openDayPanel(dateStr) {
+  adminCal.setSelected(dateStr);
+  const body = UI.el('div', { class: 'stack' }, [UI.loadingRow()]);
+  const handle = showModal(I18N.t('day_panel_title', { date: fmtWeekdayDate(dateStr) }), body, {
+    onClose: () => {
+      adminCal.setSelected(null);
+      STATE.dayPanel = null;
+    },
+  });
+  STATE.dayPanel = { body, dateStr, handle, token: 0 };
+  await refreshDayPanel();
+}
+
+async function refreshDayPanel() {
+  const panel = STATE.dayPanel;
+  if (!panel) return;
+  const token = ++panel.token;
+  try {
+    const data = await Api.adminSlotsDay(panel.dateStr, STATE.calendarLocationFilter);
+    if (panel !== STATE.dayPanel || token !== panel.token || !panel.handle.isOpen()) return;
+    renderDayPanel(panel.body, panel.dateStr, data.slots || []);
+  } catch (err) {
+    if (panel !== STATE.dayPanel || token !== panel.token || !panel.handle.isOpen()) return;
+    panel.body.replaceChildren(UI.banner(messageForError(err), 'error'));
+  }
+}
+
+function renderDayPanel(body, dateStr, slots) {
+  const list = UI.el('div', { class: 'list' });
+  if (slots.length === 0) {
+    list.appendChild(UI.emptyState({ icon: 'calendar-xmark', text: I18N.t('day_panel_empty') }));
+  }
+  slots.forEach((slot) => list.appendChild(renderSlotRow(dateStr, slot, slots)));
+  body.replaceChildren(list);
 }
 
 function renderSlotPanel(body, dateStr, slot, allSlots) {
